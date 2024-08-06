@@ -473,7 +473,7 @@ def ask_for_input_until_file_exists(string_in):
     return path
 
 class Experiment:
-    def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None) -> None:
+    def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None,partition= 'day',ncores=32) -> None:
         self.jobs = []
         
         if load_experiment:
@@ -491,6 +491,9 @@ class Experiment:
                 Geomin = ask_for_input_until_file_exists('enter geom file: ')
             if data_dir == None:
                 data_dir = ask_for_input_until_file_exists('enter data directory: ')
+            self.config['sbatch_default'] = get_sbatch_standard()
+            self.config['sbatch_default']['-p'] = partition
+            self.config['sbatch_default']['-c'] = str(ncores)
             self.config['cell'] = Cellfile
             self.config['data_dir'] = data_dir
             self.config['geom'] = Geomin
@@ -523,7 +526,7 @@ class Experiment:
         self.indexamajig_config = get_indexamajiq_parameters()
         if indexamajig_config != None:
             self.indexamajig_config.update(indexamajig_config)
-        self.sbatch_parameters = get_sbatch_standard()
+        self.sbatch_parameters = self.config['sbatch_default']
         if sbatch_parameters != None:
             self.sbatch_parameters.update(sbatch_parameters)
         IO_config = dict()
@@ -571,9 +574,13 @@ class Experiment:
         self.wait_until_done()
         cat_list_files(run['stream_parts'],run['Stream_name'])
     
-
+    def add_sbatch_default(self,sbatch_parameters: dict):
+        self.config['sbatch_default'].update(sbatch_parameters)
+        save_config(self.config,self.config['configpath'])
     
-    
+    def clean_sbatch_default(self):
+        self.config['sbatch_default'] = get_sbatch_standard()
+        save_config(self.config,self.config['configpath'])
 
     def setup_list(self,string_to_match,list_out):
         files = make_list(string_to_match,list_out)
@@ -592,7 +599,7 @@ class Experiment:
                 pg = input('Enter partialator pg: ')
         outpath = self.config['workpath'] + f'/partialator_{i}'
         outhkl = outpath + f'/partialator_{i}.hkl'
-        self.sbatch_config = get_sbatch_standard()
+        self.sbatch_config = self.config['sbatch_default']
         self.sbatch_config['--output'] = outpath + f'/partialator_{i}.log'
         self.sbatch_config['--error'] = outpath + f'/partialator_{i}.log'
         if sbatch_config != None:
