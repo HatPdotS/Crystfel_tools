@@ -393,6 +393,8 @@ def align_spots(df_hits,df_crystal):
             df_hits.loc[f,'deviation'] = np.min(np.sqrt((df_hits.loc[f,'fs'] - crystal_panel.fs)**2 + (df_hits.loc[f,'ss'] - crystal_panel.ss)**2))
     return df_hits
 
+
+
 def calc_deviations(streamin):
     path_out  = streamin.replace('.stream','_deviations.csv')
     if os.path.exists(path_out):
@@ -444,6 +446,40 @@ def make_standard_screen():
     screen['--int-radius'] = ['5,7,10']
     screen['--min-pix-count'] = ['2','3']
     return screen
+
+def get_statistics(hklin,cell,rescut=None,nshells=20,fom_list = ['rsplit','cc','"cc*"']):
+    dfs = []
+    check_hkl_out = hklin.replace('.hkl','_stats.dat')
+    cmd = '''module load crystfel/0.11.0; check_hkl {hklin} -p {cell} --nshells={nshells} --shell-file={check_hkl_out}'''
+    cmd = cmd.format(hklin=hklin,cell=cell,nshells=nshells,check_hkl_out=check_hkl_out)
+    if rescut != None:
+        cmd += ' --highres={rescut}'.format(rescut=rescut)
+    os.system(cmd)
+    df = pd.read_csv(check_hkl_out,delim_whitespace=True,skiprows=1,names=['1/d centre','nrefs_possible','nrefs_observed','Compl','Meas','Red','SNR','Mean I','d/A','Min 1/nm','Max 1/nm'])
+    df.set_index('d/A',inplace=True)
+    df = df[['nrefs_observed','Compl','Meas','Red','SNR','Mean I']]
+    dfs.append(df)
+    for fom in fom_list:
+        hkl1 = hklin.replace('.hkl',f'.hkl1')
+        hkl2 = hklin.replace('.hkl',f'.hkl2')
+        path_out = hklin.replace('.hkl',f'_{fom}.dat').replace('"cc*"','ccstar')
+        cmd = '''module load crystfel/0.11.0; compare_hkl {hkl1} {hkl2} -p {cell} --fom={fom} --nshells={nshells} --shell-file={path_out}'''
+        cmd = cmd.format(hkl1=hkl1,hkl2=hkl2,cell=cell,fom=fom,nshells=nshells,path_out=path_out)
+        if rescut != None:
+            cmd += ' --highres={rescut}'.format(rescut=rescut)
+        os.system(cmd)
+        if fom == '"cc*"':
+            fom = 'ccstar'
+        df = pd.read_csv(path_out,delim_whitespace=True,skiprows=1,names=['1/d centre',fom,'nref','d/A','Min 1/nm','Max 1/nm'])
+        df.set_index('d/A',inplace=True)
+        dfs.append(df[fom])
+    df = pd.concat(dfs,axis=1)
+    print(df.to_markdown())
+    with open(hklin.replace('.hkl','.statistics.dat'),'w') as f:
+        f.write(df.to_markdown())
+    df.to_csv(hklin.replace('.hkl','.statistics.csv'))
+    return df
+    
 
 def setup_experiment(configpath,experiment_name):
     config = dict()
