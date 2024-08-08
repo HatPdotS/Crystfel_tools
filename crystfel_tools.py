@@ -242,7 +242,7 @@ def mask_maker(h5_in,n=1000,id=None,boxsize=7,mask_inner_edges=True,mask_outer_e
         mask[4111] = False
     return mask,data
 
-def cat_list_files(list_files,outpath,remove_group_statements = True):
+def cat_files(list_files,outpath,remove_group_statements = True):
     with open(outpath,'w') as f:
         for file in list_files:
             with open(file,'r') as g:
@@ -612,7 +612,7 @@ class Experiment:
         self.config[run_id] = run
         save_config(self.config,self.config['configpath'])
         self.wait_until_done()
-        cat_list_files(run['stream_parts'],run['Stream_name'])
+        cat_files(run['stream_parts'],run['Stream_name'])
     
     def edit_sbatch_default(self,sbatch_parameters: dict):
         self.config['sbatch_default'].update(sbatch_parameters)
