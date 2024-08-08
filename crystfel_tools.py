@@ -614,11 +614,11 @@ class Experiment:
         self.wait_until_done()
         cat_list_files(run['stream_parts'],run['Stream_name'])
     
-    def add_sbatch_default(self,sbatch_parameters: dict):
+    def edit_sbatch_default(self,sbatch_parameters: dict):
         self.config['sbatch_default'].update(sbatch_parameters)
         save_config(self.config,self.config['configpath'])
     
-    def clean_sbatch_default(self):
+    def add_sbatch_default(self):
         self.config['sbatch_default'] = get_sbatch_standard()
         save_config(self.config,self.config['configpath'])
 
