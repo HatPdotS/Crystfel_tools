@@ -483,7 +483,41 @@ def get_statistics(hklin,cell,resmax=None,nshells=20,fom_list = ['rsplit','cc','
         f.write(df.to_markdown())
     df.to_csv(hklin.replace('.hkl','.statistics.csv'))
     return df
+
+def convert_crystfel_to_mtz(file,outfile,cell,symm):
+    os.makedirs(os.path.dirname(outfile),exist_ok=True)
+    if isinstance(cell,list):
+        cell = ' '.join([str(p) for p in cell])
+    os.system(f"sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl")
+    cmd = f"""f2mtz HKLIN create-mtz.temp.hkl HKLOUT {outfile} > out.html << EOF
+TITLE Reflections from CrystFEL
+NAME PROJECT wibble CRYSTAL wibble DATASET wibble
+CELL {cell}
+SYMM {symm}
+SKIP 3
+LABOUT H K L IMEAN SIGIMEAN
+CTYPE  H H H J     Q
+FORMAT '(3(F4.0,1X),F10.2,10X,F10.2)'
+EOF"""
+    os.system(cmd)
+    os.system('rm create-mtz.temp.hkl')
     
+def read_crystfel_cell_file(file):
+    with open(file) as f:
+        for line in f:
+            if line[:3] == 'a =':
+                a = float(line.split()[2])
+            if line[:3] == 'b =':
+                b = float(line.split()[2])
+            if line[:3] == 'c =':
+                c = float(line.split()[2])
+            if line[:4] == 'al =':
+                alpha = float(line.split()[2])
+            if line[:4] == 'be =':
+                beta = float(line.split()[2])
+            if line[:4] == 'ga =':
+                gamma = float(line.split()[2])
+    return a,b,c,alpha,beta,gamma
 
 def setup_experiment(configpath,experiment_name):
     config = dict()
@@ -626,6 +660,9 @@ class Experiment:
         files = make_list(string_to_match,list_out)
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
+    
+
+
 
     def setup_partialator(self,runid,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None,save_config_=True):  
         stream_in = self.config[runid]['Stream_name']
