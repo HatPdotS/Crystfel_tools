@@ -447,13 +447,15 @@ def make_standard_screen():
     screen['--min-pix-count'] = ['2','3']
     return screen
 
-def get_statistics(hklin,cell,rescut=None,nshells=20,fom_list = ['rsplit','cc','"cc*"']):
+def get_statistics(hklin,cell,resmax=None,nshells=20,fom_list = ['rsplit','cc','"cc*"'],resmin=None):
     dfs = []
     check_hkl_out = hklin.replace('.hkl','_stats.dat')
     cmd = '''module load crystfel/0.11.0; check_hkl {hklin} -p {cell} --nshells={nshells} --shell-file={check_hkl_out}'''
     cmd = cmd.format(hklin=hklin,cell=cell,nshells=nshells,check_hkl_out=check_hkl_out)
-    if rescut != None:
-        cmd += ' --highres={rescut}'.format(rescut=rescut)
+    if resmax != None:
+        cmd += ' --highres={rescut}'.format(rescut=resmax)
+    if resmin != None:
+        cmd += ' --lowres={rescut}'.format(rescut=resmin)
     os.system(cmd)
     df = pd.read_csv(check_hkl_out,delim_whitespace=True,skiprows=1,names=['1/d centre','nrefs_possible','nrefs_observed','Compl','Meas','Red','SNR','Mean I','d/A','Min 1/nm','Max 1/nm'])
     df.set_index('d/A',inplace=True)
@@ -465,8 +467,10 @@ def get_statistics(hklin,cell,rescut=None,nshells=20,fom_list = ['rsplit','cc','
         path_out = hklin.replace('.hkl',f'_{fom}.dat').replace('"cc*"','ccstar')
         cmd = '''module load crystfel/0.11.0; compare_hkl {hkl1} {hkl2} -p {cell} --fom={fom} --nshells={nshells} --shell-file={path_out}'''
         cmd = cmd.format(hkl1=hkl1,hkl2=hkl2,cell=cell,fom=fom,nshells=nshells,path_out=path_out)
-        if rescut != None:
-            cmd += ' --highres={rescut}'.format(rescut=rescut)
+        if resmax != None:
+            cmd += ' --highres={rescut}'.format(rescut=resmax)
+        if resmin != None:
+            cmd += ' --lowres={rescut}'.format(rescut=resmin)
         os.system(cmd)
         if fom == '"cc*"':
             fom = 'ccstar'
@@ -623,7 +627,7 @@ class Experiment:
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
 
-    def setup_partialator(self,runid,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None):  
+    def setup_partialator(self,runid,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None,save_config_=True):  
         stream_in = self.config[runid]['Stream_name']
         i = 0 
         while os.path.exists(self.config['workpath'] + f'/partialator_{i}'):
@@ -655,7 +659,8 @@ class Experiment:
         run_id = f'Partialator_{i}'
         self.config[run_id] = run
         self.config['runs'].append(run_id)
-        save_config(self.config,self.config['configpath'])
+        if save_config_:
+            save_config(self.config,self.config['configpath'])
         return run_id
 
     def execute_partialator(self,run_id):
