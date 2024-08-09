@@ -488,7 +488,7 @@ def convert_crystfel_to_mtz(file,outfile,cell,symm):
     os.makedirs(os.path.dirname(outfile),exist_ok=True)
     if isinstance(cell,list) or isinstance(cell,tuple):
         cell = ' '.join([str(p) for p in cell])
-    cmd = f"""sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl;
+    cmd = r"""sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl;
     f2mtz HKLIN create-mtz.temp.hkl HKLOUT {outfile} > out.html << EOF
 TITLE Reflections from CrystFEL
 NAME PROJECT wibble CRYSTAL wibble DATASET wibble
@@ -499,6 +499,7 @@ LABOUT H K L IMEAN SIGIMEAN
 CTYPE  H H H J     Q
 FORMAT '(3(F4.0,1X),F10.2,10X,F10.2)'
 EOF"""
+    cmd = cmd.format(file=file,outfile=outfile,cell=cell,symm=symm)
     print(cmd)
     os.system(cmd)
     os.system('rm create-mtz.temp.hkl')
