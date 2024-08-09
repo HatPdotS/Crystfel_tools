@@ -486,7 +486,7 @@ def get_statistics(hklin,cell,resmax=None,nshells=20,fom_list = ['rsplit','cc','
 
 def convert_crystfel_to_mtz(file,outfile,cell,symm):
     os.makedirs(os.path.dirname(outfile),exist_ok=True)
-    if isinstance(cell,list):
+    if isinstance(cell,list) or isinstance(cell,tuple):
         cell = ' '.join([str(p) for p in cell])
     cmd = f"""sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl;
     f2mtz HKLIN create-mtz.temp.hkl HKLOUT {outfile} > out.html << EOF
