@@ -1,4 +1,3 @@
-import sparse
 import pandas as pd
 import numpy as np
 
@@ -23,7 +22,7 @@ def apply_pg(df, pg,merge_friedel=True):
         df.loc[df.h < 0,['h','k','l']] *= -1
     print(df)
     if pg == '-1':
-        df[['h','k','l']].loc[df.h < 0] *= -1 
+        df.loc[df.h < 0,['h','k','l']] *= -1 
         return df
     if pg == '222':
         df.k = np.abs(df.k)

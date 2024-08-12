@@ -1,9 +1,8 @@
-import sparse
 import pandas as pd
 import numpy as np
-from handling import data_conversion
-from handling import fast_math
-import multiprocessing as mp
+from crystfel_tools.handling import data_conversion
+from crystfel_tools.handling import fast_math
+
 
 
 
@@ -13,7 +12,9 @@ class scale_it:
         self.df_split = data_conversion.split_df(df)
         self.res = df.resolution
     
-    
+    def sanitize_crystal(self,crystal):
+        return crystal.loc[crystal['I']>0]
+
     def sanitize_crystal(self,crystal):
         crystal = crystal.copy()
         idx = np.where(crystal.data > 0)
