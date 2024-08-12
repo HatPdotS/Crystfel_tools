@@ -130,6 +130,18 @@ def shuffle_lines_list(filein,n=None):
         g.writelines(d)
     return fileout
 
+def cut_stream_after_ncrystals(streamfile,outfile,n):
+    counter = 0
+    with open(streamfile,'r') as f:
+        with open(outfile,'w') as g:
+            for line in f:
+                if '--- Begin crystal' == line.strip('\n'):
+                    counter += 1
+                if line.strip('\n') == '----- Begin chunk -----':
+                    if counter >= n:
+                        break
+                g.write(line)
+
 def produce_1000_events_per_file(pathin):
     pathout = pathin.replace('.lst','_all_events.lst')
     with open(pathin,'r') as f:
@@ -623,6 +635,25 @@ class Experiment:
             self.config['runs'] = []
             os.makedirs(self.config['workpath'],exist_ok=True)
             save_config(self.config,configpath)
+    
+    def cut_stream(self,streamfile,n,runnumber = None):
+        if runnumber == None:
+            i = 0 
+            while True:
+                outdir = os.path.join(self.config['workpath'],f'stream_cut_{i}')
+                if not os.path.exists(outdir):
+                    break
+                i += 1
+            runnumber = i
+        outdir = os.path.join(self.config['workpath'],f'stream_cut_{runnumber}')
+        runid = f'stream_cut_{runnumber}'
+        os.makedirs(outdir,exist_ok=True)
+        streamout = os.path.join(outdir,f'stream_cut_{runnumber}.stream')
+        self.config['runs'].append(runid)
+        self.config[runid] = {'stream_in': streamfile, 'Stream_name': streamout, 'n_crystals': n}
+        cut_stream_after_ncrystals(streamfile,streamout,n)
+        save_config(self.config,self.config['configpath'])
+        return runid
 
     def setup_run(self,list_in,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None):
         if cell == None:
@@ -637,7 +668,6 @@ class Experiment:
                     break
                 i += 1
             runnumber = i
-
         outdir = os.path.join(self.config['workpath'],f'run_{runnumber}')
         os.makedirs(outdir,exist_ok=True)
         list_local = os.path.join(outdir,f'run_{runnumber}.lst')
@@ -692,6 +722,10 @@ class Experiment:
         self.config[run_id] = run
         save_config(self.config,self.config['configpath'])
         self.wait_until_done()
+        self.cat_files(run_id)
+    
+    def cat_files(self,run_id):
+        run = self.config[run_id]
         cat_files(run['stream_parts'],run['Stream_name'])
     
     def edit_sbatch_default(self,sbatch_parameters: dict):
@@ -706,9 +740,6 @@ class Experiment:
         files = make_list(string_to_match,list_out)
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
-    
-
-
 
     def setup_partialator(self,runid,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None,save_config_=True):  
         stream_in = self.config[runid]['Stream_name']
