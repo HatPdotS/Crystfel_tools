@@ -4,3 +4,4 @@ crystfel_tools.egg-info/PKG-INFO
 crystfel_tools.egg-info/SOURCES.txt
 crystfel_tools.egg-info/dependency_links.txt
 crystfel_tools.egg-info/top_level.txt
+tests/testing.py

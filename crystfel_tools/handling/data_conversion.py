@@ -49,3 +49,10 @@ def make_sparse(df):
     data = sparse.COO(coords=(df['idx_hkl'], df['idx']), data=df['I'], shape=(df['idx_hkl'].max()+1, df['idx'].max()+1))
     weights = sparse.COO(coords=(df['idx_hkl'], df['idx']), data=np.ones_like(df['I']), shape=(df['idx_hkl'].max()+1, df['idx'].max()+1))
     return data, weights
+
+def split_df(df):
+    """
+    Split the reflections dataframe into a list of dataframes
+    """
+    dfs = [x for _, x in df.groupby('idx')]
+    return dfs

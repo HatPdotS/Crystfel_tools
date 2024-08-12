@@ -5,18 +5,14 @@ from handling import data_conversion
 from handling import fast_math
 import multiprocessing as mp
 
-def select_crystal(i):
-    return sp[:,i]
+
 
 class scale_it:
     def __init__(self,df):
-        self.sparse, self.weigths = data_conversion.make_sparse(df)
+        self.df_raw = df
+        self.df_split = data_conversion.split_df(df)
         self.res = df.resolution
     
-    def split_crystal(self):
-        sp = self.sparse
-        with mp.Pool(56) as p:
-            self.crystals = p.map(select_crystal,range(sp.shape[1]))
     
     def sanitize_crystal(self,crystal):
         crystal = crystal.copy()
