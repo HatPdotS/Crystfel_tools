@@ -7,6 +7,7 @@ from glob import glob
 import h5py
 import shutil
 import numpy as np
+from collections import defaultdict
 
 def edit_geom(template: str, to_change: dict,outfile):
     with open(template) as f:
@@ -503,6 +504,49 @@ EOF"""
     print(cmd)
     os.system(cmd)
     os.system('rm create-mtz.temp.hkl')
+
+def read_partialator_hkl(file):
+    res = defaultdict(list)
+    with open(file) as f:
+        next(f)
+        next(f)
+        next(f)
+        for line in f:
+            if line.strip('\n') == 'End of reflections':
+                break
+            h,k,l,I,phase,sigma,nmeas = line.strip('\n').split()
+            res['h'].append(int(h))
+            res['k'].append(int(k))
+            res['l'].append(int(l))
+            res['I'].append(float(I))
+            if phase == '-':
+                phase = np.nan
+            res['sigma'].append(float(sigma))
+            res['phase'].append(float(phase))
+            res['nmeas'].append(int(nmeas))
+    df = pd.DataFrame(res)
+    df.h = df.h.astype(int)
+    df.k = df.k.astype(int)
+    df.l = df.l.astype(int)
+    df.I = df.I.astype(float)
+    df.sigma = df.sigma.astype(float)
+    df.nmeas = df.nmeas.astype(int)
+    print(df)
+    return df
+
+def write_df_as_hklf4(df,outfile):
+    df.sigma = df.sigma / df.I.mean() * 100
+    df.I = df.I / df.I.mean() * 100
+    with open(outfile,'w') as f:
+        # f.write('H K L I SIGMA\n')
+        for i in range(df.shape[0]):
+            f.write(f'{int(df.iloc[i].h):>4}{int(df.iloc[i].k):>4}{int(df.iloc[i].l):>4}{df.iloc[i].I:>8.2f}{df.iloc[i].sigma:>8.2f}\n')
+
+
+
+def confert_hkl_to_hklf4(filein,fileout):
+    df = read_partialator_hkl(filein)
+    write_df_as_hklf4(df,fileout)
     
 def read_crystfel_cell_file(file):
     with open(file) as f:
