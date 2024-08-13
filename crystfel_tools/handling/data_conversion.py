@@ -1,11 +1,29 @@
 import pandas as pd
+import sparse
 import numpy as np
+
+def load_reference(hkl,ref_for_relabeling):
+    """
+    Load the reference hkl file
+    """
+    ref_for_relabeling = ref_for_relabeling.groupby(['h','k','l']).first().reset_index()
+    ref_for_relabeling['triplet'] = ref_for_relabeling['h'].astype(str) + '_' + ref_for_relabeling['k'].astype(str) + '_' + ref_for_relabeling['l'].astype(str)
+    
+    ref = pd.read_csv(hkl, sep=r'\s+', names=['h','k','l','I','phase','sigma','nmeas'],skiprows=3)
+    ref['triplet'] = ref['h'].astype(str) + '_' + ref['k'].astype(str) + '_' + ref['l'].astype(str)
+    ref['idx_hkl'] = np.nan
+    ref['idx_hkl'] = ref['triplet'].map(ref_for_relabeling.set_index('triplet')['idx_hkl']).astype('Float64')
+    ref = ref.loc[~ref['idx_hkl'].isna()]
+
+    ref.idx_hkl = ref.idx_hkl.astype(int)
+    return ref
 
 def relabel_hkl(df):
     """
     Relabel the hkl columns in the reflections dataframe to match the
     hkl columns in the crystal dataframe
     """
+    df.sort_values(by=['h','k','l'], inplace=True)
     df['triplet'] = df['h'].astype(str) + '_' + df['k'].astype(str) + '_' + df['l'].astype(str)
     hkl = df.groupby('triplet').first()
     hkl['id'] = range(len(hkl))
@@ -20,7 +38,6 @@ def apply_pg(df, pg,merge_friedel=True):
     if merge_friedel:
         print(df.loc[df.h < 0,['h','k','l']])
         df.loc[df.h < 0,['h','k','l']] *= -1
-    print(df)
     if pg == '-1':
         df.loc[df.h < 0,['h','k','l']] *= -1 
         return df

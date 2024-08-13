@@ -10,23 +10,17 @@ class scale_it:
     def __init__(self,df):
         self.df_raw = df
         self.df_split = data_conversion.split_df(df)
-        self.res = df.resolution
     
     def sanitize_crystal(self,crystal):
         return crystal.loc[crystal['I']>0]
 
     def sanitize_crystal(self,crystal):
         crystal = crystal.copy()
-        idx = np.where(crystal.data > 0)
-        crystal.coords = crystal.coords[:,idx]
-        crystal.data = crystal.data[idx]
+        crystal = crystal.loc[crystal['I']>0]
         return crystal
 
-        
     def get_mean(self):
         return fast_math.calc_mean(self.data * self.brightness,self.weigths/self.brightness)
-    
-
 
     def scale_frames_brightness(self):
         mean = self.get_mean()
