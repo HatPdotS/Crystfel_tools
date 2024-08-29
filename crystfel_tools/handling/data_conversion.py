@@ -2,7 +2,7 @@ import pandas as pd
 import sparse
 import numpy as np
 
-def load_reference(hkl,ref_for_relabeling):
+def load_reference(hkl,ref_for_relabeling,pg='-1'):
     """
     Load the reference hkl file
     """
@@ -10,6 +10,7 @@ def load_reference(hkl,ref_for_relabeling):
     ref_for_relabeling['triplet'] = ref_for_relabeling['h'].astype(str) + '_' + ref_for_relabeling['k'].astype(str) + '_' + ref_for_relabeling['l'].astype(str)
     
     ref = pd.read_csv(hkl, sep=r'\s+', names=['h','k','l','I','phase','sigma','nmeas'],skiprows=3)
+    ref = extend_reference_to_full_ewaldsphere(ref,pg=pg)
     ref['triplet'] = ref['h'].astype(str) + '_' + ref['k'].astype(str) + '_' + ref['l'].astype(str)
     ref['idx_hkl'] = np.nan
     ref['idx_hkl'] = ref['triplet'].map(ref_for_relabeling.set_index('triplet')['idx_hkl']).astype('Float64')
@@ -50,6 +51,15 @@ def apply_pg(df, pg,merge_friedel=True):
         return df
     print('Symmetry not implemented')
 
+def extend_reference_to_full_ewaldsphere(ref,pg):
+    if pg == '-1':
+        refnew = ref.copy()
+        refnew['h'] *= -1 
+        refnew['k'] *= -1 
+        refnew['l'] *= -1 
+        ref = pd.concat([ref,refnew])
+        return ref
+
 def get_resolution(df,cell):
     """
     Get the resolution of the reflections dataframe
@@ -65,6 +75,8 @@ def make_sparse(df):
     data = sparse.COO(coords=(df['idx_hkl'], df['idx']), data=df['I'], shape=(df['idx_hkl'].max()+1, df['idx'].max()+1))
     weights = sparse.COO(coords=(df['idx_hkl'], df['idx']), data=np.ones_like(df['I']), shape=(df['idx_hkl'].max()+1, df['idx'].max()+1))
     return data, weights
+
+
 
 def split_df(df):
     """
