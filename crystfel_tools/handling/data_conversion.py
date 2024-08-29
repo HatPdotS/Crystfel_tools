@@ -1,6 +1,7 @@
 import pandas as pd
 import sparse
 import numpy as np
+from crystfel_tools.handling import io_functions
 
 def load_reference(hkl,ref_for_relabeling,pg='-1'):
     """
@@ -9,7 +10,7 @@ def load_reference(hkl,ref_for_relabeling,pg='-1'):
     ref_for_relabeling = ref_for_relabeling.groupby(['h','k','l']).first().reset_index()
     ref_for_relabeling['triplet'] = ref_for_relabeling['h'].astype(str) + '_' + ref_for_relabeling['k'].astype(str) + '_' + ref_for_relabeling['l'].astype(str)
     
-    ref = pd.read_csv(hkl, sep=r'\s+', names=['h','k','l','I','phase','sigma','nmeas'],skiprows=3)
+    ref = io_functions.read_crystfel_hkl(hkl)
     ref = extend_reference_to_full_ewaldsphere(ref,pg=pg)
     ref['triplet'] = ref['h'].astype(str) + '_' + ref['k'].astype(str) + '_' + ref['l'].astype(str)
     ref['idx_hkl'] = np.nan

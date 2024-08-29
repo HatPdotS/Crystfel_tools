@@ -501,7 +501,7 @@ def convert_crystfel_to_mtz(file,outfile,cell,symm):
     os.makedirs(os.path.dirname(outfile),exist_ok=True)
     if isinstance(cell,list) or isinstance(cell,tuple):
         cell = ' '.join([str(p) for p in cell])
-    cmd = r"""sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl;
+    cmd = r"""module load ccp4; sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl;
     f2mtz HKLIN create-mtz.temp.hkl HKLOUT {outfile} > out.html << EOF
 TITLE Reflections from CrystFEL
 NAME PROJECT wibble CRYSTAL wibble DATASET wibble
@@ -889,3 +889,4 @@ class scan_clen:
         if outpath == None:
             outpath = os.path.join(self.path_out,'clen_scan_results.png')
         plt.savefig(outpath)
+

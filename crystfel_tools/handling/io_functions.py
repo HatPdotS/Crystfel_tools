@@ -35,6 +35,34 @@ def read_crystal_reflections(open_file):
         res['background'].append(float(background))
     return res
 
+def read_cell(file):
+    cell = {}
+    with open(file) as f:
+        for line in f:
+            try: 
+                key, value = line.split('=')
+                cell[key.strip()] = float(value.strip().split()[0])
+            except: pass
+    return list(cell.values())
+
+def write_hkl(file_out,df,Symmetry):
+    triplet = df[['h','k','l']].values
+    mean = df['I'].values
+    std = df['sigma'].values
+    nmeas = df['nmeas'].values
+    with open(file_out,'w') as f:
+        # header = '!ITEM_H=1\n!ITEM_K=2\n!ITEM_L=3\n!ITEM_IOBS=4\n!ITEM_SIGMA(IOBS)=5\n!END_OF_HEADER\n'
+        # f.write(header)
+        f.write('CrystFEL reflection list version 2.0\n')
+        f.write(f'Symmetry: {Symmetry}\n')
+        f.write('   h    k    l          I    phase   sigma(I)   nmeas\n')
+        for i in range(len(triplet)):
+            if str(mean[i]).lower() == 'nan':
+                continue
+            s = f'{triplet[i][0]:>4}{triplet[i][1]:>5}{triplet[i][2]:>5}{mean[i]:>11.2f}        -{std[i]:>11.2f}{nmeas[i]:>8}\n'
+            f.write(s)
+        f.write('End of reflections')
+
 def read_crystal(open_file):
     crystal = {}
     cell_line = next(open_file).split()
@@ -136,6 +164,15 @@ def build_dataframe(stream):
     df = pd.concat(df)
     return data, df
 
+def read_crystfel_hkl(path):
+    ref = pd.read_csv(path, sep=r'\s+', names=['h','k','l','I','phase','sigma','nmeas'],skiprows=3,on_bad_lines='skip').dropna()
+    ref.h = ref.h.astype(int)
+    ref.k = ref.k.astype(int)
+    ref.l = ref.l.astype(int)
+    ref.I = ref.I.astype(float)
+    ref.sigma = ref.sigma.astype(float) 
+    ref.nmeas = ref.nmeas.astype(int)
+    return ref
 
 
 
