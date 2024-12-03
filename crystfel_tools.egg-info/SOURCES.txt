@@ -8,5 +8,7 @@ crystfel_tools/handling/data_conversion.py
 crystfel_tools/handling/fast_math.py
 crystfel_tools/handling/io_functions.py
 crystfel_tools/handling/scaling.py
+crystfel_tools/handling/stream_handler.py
 tests/test_data_loading.py
 tests/test_df_splitting.py
+tests/test_scaling.py

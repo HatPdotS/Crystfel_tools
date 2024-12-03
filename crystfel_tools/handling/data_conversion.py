@@ -16,7 +16,6 @@ def load_reference(hkl,ref_for_relabeling,pg='-1'):
     ref['idx_hkl'] = np.nan
     ref['idx_hkl'] = ref['triplet'].map(ref_for_relabeling.set_index('triplet')['idx_hkl']).astype('Float64')
     ref = ref.loc[~ref['idx_hkl'].isna()]
-
     ref.idx_hkl = ref.idx_hkl.astype(int)
     return ref
 
@@ -59,6 +58,24 @@ def extend_reference_to_full_ewaldsphere(ref,pg):
         refnew['k'] *= -1 
         refnew['l'] *= -1 
         ref = pd.concat([ref,refnew])
+        return ref
+    if pg == 'mmm':
+        for dim in ['k','l']:
+            refnew = ref.copy()
+            refnew[dim] *= -1 
+            ref = pd.concat([ref,refnew])
+        refnew['h'] *= -1 
+        refnew['k'] *= -1 
+        refnew['l'] *= -1 
+        ref = pd.concat([ref,refnew])
+        ref = ref.groupby(['h','k','l']).first().reset_index()
+        return ref
+
+    if pg == '222':
+        for dim in ['h','k']:
+            refnew = ref.copy()
+            refnew[dim] *= -1 
+            ref = pd.concat([ref,refnew])
         return ref
 
 def get_resolution(df,cell):

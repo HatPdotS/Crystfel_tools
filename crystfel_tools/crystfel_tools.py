@@ -460,7 +460,8 @@ def make_standard_screen():
     screen['--min-pix-count'] = ['2','3']
     return screen
 
-def get_statistics(hklin,cell,resmax=None,nshells=20,fom_list = ['rsplit','cc','"cc*"'],resmin=None):
+def get_statistics(hklin,cell,resmax=None,nshells=20,
+                   fom_list = ['rsplit','cc','"cc*"'],resmin=None):
     dfs = []
     check_hkl_out = hklin.replace('.hkl','_stats.dat')
     cmd = '''module load crystfel/0.11.0; check_hkl {hklin} -p {cell} --nshells={nshells} --shell-file={check_hkl_out}'''

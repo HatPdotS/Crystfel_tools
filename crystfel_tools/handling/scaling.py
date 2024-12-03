@@ -19,10 +19,22 @@ class scale_it:
         self.startalpha = startalpha
         self.startbeta = startbeta
         self.pg = pg
-
     
+    def shuffle_crystals(self):
+        np.random.shuffle(self.df_split)
+
     def load_crystal(self,nr):
         self.current_crystal = self.sanitize_crystal(self.df_split[nr])
+        self.current_crystal = self.current_crystal.loc[self.current_crystal.idx_hkl.isin(self.reference.idx_hkl)]
+        self.current_ref = self.reference.loc[self.reference.idx_hkl.isin(self.current_crystal.idx_hkl)]
+        self.current_ref = self.current_ref.sort_values('idx_hkl')
+        self.current_crystal = self.current_crystal.sort_values('idx_hkl')
+
+    def load_crystal_for_simple(self,nr):
+        self.current_crystal = self.sanitize_crystal(self.df_split[nr])
+        self.current_crystal[['h','k','l']] = np.abs(self.current_crystal[['h','k','l']].astype(int))
+        self.temp = self.current_crystal.groupby(['h','k','l']).mean().reset_index()
+        self.temp.idx_hkl = self.current_crystal.groupby(['h','k','l']).first().reset_index().idx_hkl
         self.current_crystal = self.current_crystal.loc[self.current_crystal.idx_hkl.isin(self.reference.idx_hkl)]
         self.current_ref = self.reference.loc[self.reference.idx_hkl.isin(self.current_crystal.idx_hkl)]
         self.current_ref = self.current_ref.sort_values('idx_hkl')
@@ -55,6 +67,16 @@ class scale_it:
         self.res = minimize(fast_math.residual_xpshere,factor0,args=(self.current_crystal[['h','k','l']].values,self.current_crystal['I'].values,self.current_ref['I'].values,self.cell,self.ech,self.deltaech)
                             ,bounds=bounds,method='L-BFGS-B')
         return self.res
+
+    def scale_current_crystal_simple(self):
+        factor0 = np.array([1,0])
+        bounds = [(1e-32,None),(-1e10,1e10)]
+        self.res = minimize(fast_math.residual_simple,factor0,args=(self.current_crystal[['h','k','l']].values,self.current_crystal['I'].values,self.current_ref['I'].values,self.cell)
+                            ,bounds=bounds,method='L-BFGS-B')
+        return self.res
+    
+    def apply_scaling_simple(self):
+        self.I_scaled, self.weights, self.mask = fast_math.apply_scaling_simple(self.res.x,self.current_crystal[['h','k','l']].values,self.current_crystal['I'].values,self.cell)
     
     def apply_scaling_xsphere(self):
         self.I_scaled, self.weights, self.mask = fast_math.apply_scaling_xsphere(self.res.x,self.current_crystal[['h','k','l']].values,self.current_crystal['I'].values,self.cell,self.ech,self.deltaech)

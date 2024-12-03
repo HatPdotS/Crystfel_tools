@@ -16,6 +16,8 @@ def calc_rsplit_weighted(set1,set2,weights=None):
     """
     if weights is None:
         weights = np.ones_like(set1)
+    set1 = set1 / set1.mean()
+    set2 = set2 / set2.mean()
     return np.sqrt(np.sum((set1 - set2)**2 * weights)) / weights.sum()
 
 
@@ -113,10 +115,6 @@ def intensity_of_all_non_observed(hkl_not_observed,alpha,beta,ech,deltaech,cell)
     lattice_points = convert_to_rec_space(hkl_not_observed,rec).reshape(-1,3,1)
     return np.sum(energy_at_S2(lattice_points,alpha,beta,ech,deltaech))
 
-def calc_residual_simple(factors,I,I_ref,hkl):
-        residual = np.sum((np.log(I) - np.log(I_ref) - np.log(factors[0]) - factors[1] * hkl[:,0]**2 - factors[2] * hkl[:,1]**2 - factors[3] * hkl[:,2]**2)**2)
-        return residual
-
 def I_at_hkl0(hkl0,hkl,Bi):
     sigma = np.sum(hkl**2 * Bi,axis=1)
     return np.exp(-np.sum((hkl0-hkl)**2,axis=-2) / sigma) / sigma
@@ -137,18 +135,29 @@ def calc_log_xsphere(hkl,alpha,beta,ech,deltaech,cell):
     _, lattice_points = make_sampling_box(hkl,cell)
     return calc_energy_S2_analytical_log(lattice_points.reshape(-1,3,1),alpha,beta,ech,deltaech).reshape(hkl.shape[0])
 
-def residual_simple(factors,hkl,I,I_ref,cell,ech,deltaech):
-    res = np.log(I) - np.log(I_ref) - calc_log_xsphere(hkl,*factors[[0,1]],ech,deltaech,cell)
-    res -= res.mean()
-    return np.sum(res ** 2) #* intensity_of_all_non_observed(hkl_not,factors[1],factors[2],ech,deltaech,cell)
-
 def residual_xpshere(factors,hkl,I,I_ref,cell,ech,deltaech):
     res = np.log(I) - np.log(I_ref) - calc_log_xsphere(hkl,*factors[[0,1]],ech,deltaech,cell) - factors[0] + np.sum(hkl**2,axis=1) * factors[3]
     return np.sum(res ** 2)
 
+def residual_simple(factors,hkl,I,I_ref,cell):
+    rec = calc_rec_space_vector(cell)
+    lattice = convert_to_rec_space(hkl,rec)
+    res = I*(np.log(I) - (np.log(I_ref) + np.log(factors[0]) - np.sum(lattice**2,axis=1) * factors[1]))
+    return np.sum(res ** 2)
+
+def apply_scaling_simple(factors,hkl,I,cell):
+    rec = calc_rec_space_vector(cell)
+    lattice = convert_to_rec_space(hkl,rec)
+    p = np.exp(-np.sum(lattice**2,axis=1) * factors[1]) * np.exp(factors[0])
+    p = p/p.mean()
+    mask = p > 0.1
+    I_scaled = I[mask] / p[mask]
+    return I_scaled, p[mask], mask
+
 def apply_scaling_xsphere(factors,hkl,I,cell,ech,deltaech):
     p = np.exp(calc_log_xsphere(hkl,*factors[[1,2]],ech,deltaech,cell))
-    mask = p > 0.1 * p.mean()
+    p = p/p.mean()
+    mask = p > 0.1 
     Bterm = np.exp(np.sum(hkl**2,axis=1) * factors[3])[mask]
     I_scaled = I[mask] / np.exp(factors[0]) / p[mask] / Bterm
     weights = factors[0] * p[mask] * Bterm
