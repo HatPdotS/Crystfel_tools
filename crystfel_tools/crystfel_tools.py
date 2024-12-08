@@ -23,6 +23,31 @@ def edit_geom(template: str, to_change: dict,outfile):
                         break
                 w.write(linenew)
 
+def parse_sinfo_to_dataframe() -> pd.DataFrame:
+    import subprocess
+    data = str(subprocess.check_output(["sinfo"]))
+    data = data.replace("\\n", "\n")
+    lines = [line.strip("'").strip() for line in data.split("\n") if line.strip()][1:]  
+    lines = [line for line in lines if line]
+    parsed_data = []
+    for line in lines:
+        parsed_data.append(line.split())
+    df = pd.DataFrame(parsed_data, columns=["Partition", "Avail", "TimeLimit", "Nodes", "State", "Nodelist"])
+    df["TimeLimit"] = pd.to_timedelta(df["TimeLimit"].str.replace("-", " days "))
+    df["Nodes"] = df["Nodes"].astype(int)
+    df["State"] = df["State"].astype("category")
+    default_partition = [i for i in df.Partition if '*' in i][1]
+    df.Partition = df.Partition.str.replace("*", "")
+    df = df.loc[df.Partition != "admin"]
+    print('I found the following partitions:')
+    df_dense = df.groupby("Partition").first()
+    df_dense.Nodes = df.groupby("Partition").Nodes.sum()
+    print(df_dense)
+    print('The default partition is:' , default_partition.strip('*'))   
+    df_dense = df_dense.loc[df_dense.Nodes > 5]
+    df_dense = df_dense.sort_values(by="TimeLimit", ascending=False)
+    return list(df_dense.index)
+
 def sorted_dict(d):
     return dict(sorted(d.items(), key=lambda item: item[1], reverse=True))
 
@@ -629,7 +654,7 @@ def ask_for_input_until_file_exists(string_in):
     return path
 
 class Experiment:
-    def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None,partition= 'day',ncores=32) -> None:
+    def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None,partition=None,ncores=32) -> None:
         self.jobs = []   
         if load_experiment:
             with open(configpath,'r') as f:
@@ -644,6 +669,18 @@ class Experiment:
                 Geomin = ask_for_input_until_file_exists('enter geom file: ')
             if data_dir == None:
                 data_dir = ask_for_input_until_file_exists('enter data directory: ')
+            if partition == None:
+                valid_partitions = parse_sinfo_to_dataframe()
+                print('Partition suggestions are:',valid_partitions)
+                f = False
+                while not f:
+                    partition = input('Enter partition: ')
+                    if partition in valid_partitions:
+                        f = True
+                    else:
+                        print('Partition not in suggestions, are you sure? [y/n]')
+                        if input() == 'y':
+                            f = True
             self.config['sbatch_default'] = get_sbatch_standard()
             self.config['sbatch_default']['-p'] = partition
             self.config['sbatch_default']['-c'] = str(ncores)
