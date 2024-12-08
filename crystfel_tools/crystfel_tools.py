@@ -23,6 +23,29 @@ def edit_geom(template: str, to_change: dict,outfile):
                         break
                 w.write(linenew)
 
+def sorted_dict(d):
+    return dict(sorted(d.items(), key=lambda item: item[1], reverse=True))
+
+def recursive_inventory_search(open_h5_file,paths):
+    try: 
+        keys = open_h5_file.keys()
+        for key in keys:
+            recursive_inventory_search(open_h5_file[key],paths)
+    except AttributeError:
+        paths[open_h5_file.name] = open_h5_file.size
+
+def find_key_h5_files(h5file_path):
+    with h5py.File(h5file_path,'r') as f:
+        paths = dict()
+        recursive_inventory_search(f,paths)
+    for key in list(paths.keys()):
+        if 'Simulator' in key:
+            del paths[key]
+    print(sorted_dict(paths))
+    likely_path = list(sorted_dict(paths).keys())[0]
+    print('found the most likely path to data:',likely_path)
+    return likely_path
+
 def get_all_events_smart(pathin,h5py_path):
         pathout = pathin.replace('.lst','_all_events.lst')
         with open(pathin,'r') as f:
@@ -607,16 +630,13 @@ def ask_for_input_until_file_exists(string_in):
 
 class Experiment:
     def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None,partition= 'day',ncores=32) -> None:
-        self.jobs = []
-        
+        self.jobs = []   
         if load_experiment:
             with open(configpath,'r') as f:
                 self.config = json.load(f)
         else:
             if experiment_name == None:
                 experiment_name = input('Enter experiment name: ')
-            if h5py_path == None:
-                h5py_path = ask_for_input_until_file_exists('enter h5py file: ')
             self.config = setup_experiment(configpath,experiment_name)
             if Cellfile == None:
                 Cellfile = ask_for_input_until_file_exists('enter cell file: ')
@@ -737,8 +757,15 @@ class Experiment:
         self.config['sbatch_default'] = get_sbatch_standard()
         save_config(self.config,self.config['configpath'])
 
-    def setup_list(self,string_to_match,list_out):
-        files = make_list(string_to_match,list_out)
+    def setup_list(self,string_to_match=None):
+        if string_to_match == None:
+            string_to_match = self.config['data_dir'] + '/*.h5'
+        list_out = os.path.join(self.config['workpath'],'list_files.lst')
+        make_list(string_to_match,list_out)
+        if self.config['h5py_path'] == None:
+            h5py_file = glob(string_to_match)[0]
+            self.config['h5py_path'] = find_key_h5_files(h5py_file)
+            save_config(self.config,self.config['configpath'])
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
 
@@ -783,8 +810,16 @@ class Experiment:
         self.jobs.append(run_partialator(run['Partialator_sbatch'],run['Partialator_config']))
         run['Run_started'] = True
         
-
-    def screen_indexing_parameters(self,list_in,screen,split_job=False):
+    def check_if_standard_list_exists(self):
+        list_out = os.path.join(self.config['workpath'],'list_files_all_events.lst')
+        if not os.path.exists(list_out):
+            list_out = self.setup_list()
+        return list_out
+    
+    def screen_indexing_parameters(self,screen,split_job=False,list_in=None,sample_size=5000):
+        if list_in == None:
+            list_in = self.check_if_standard_list_exists()
+        list_in = shuffle_lines_list(list_in,sample_size)
         product_values = product(*[v if isinstance(v, (list, tuple)) else [v] for v in screen.values()])
         params = [dict(zip(screen.keys(), values)) for values in product_values]
         for param in params:
