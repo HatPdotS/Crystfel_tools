@@ -38,8 +38,7 @@ def parse_sinfo_to_dataframe() -> pd.DataFrame:
         if i == "infinite":
             timlimits.append(pd.to_timedelta("1000 days"))
             continue
-        if "-" in i:
-            timlimits.append(pd.to_timedelta(df.TimeLimit.str.replace("-", " days ")))
+        timlimits.append(pd.to_timedelta(df.TimeLimit.str.replace("-", " days ")))
     df["TimeLimit"] = timlimits
     df["Nodes"] = df["Nodes"].astype(int)
     df["State"] = df["State"].astype("category")
