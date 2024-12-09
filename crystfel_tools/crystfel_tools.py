@@ -33,7 +33,14 @@ def parse_sinfo_to_dataframe() -> pd.DataFrame:
     for line in lines:
         parsed_data.append(line.split())
     df = pd.DataFrame(parsed_data, columns=["Partition", "Avail", "TimeLimit", "Nodes", "State", "Nodelist"])
-    df["TimeLimit"] = pd.to_timedelta(df["TimeLimit"].str.replace("-", " days "))
+    timlimits = []
+    for i in df.TimeLimit:
+        if i == "infinite":
+            timlimits.append(pd.to_timedelta("1000 days"))
+            continue
+        if "-" in i:
+            timlimits.append(pd.to_timedelta(df.TimeLimit.str.replace("-", " days ")))
+    df["TimeLimit"] = timlimits
     df["Nodes"] = df["Nodes"].astype(int)
     df["State"] = df["State"].astype("category")
     default_partition = [i for i in df.Partition if '*' in i][1]
