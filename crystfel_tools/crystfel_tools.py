@@ -38,10 +38,9 @@ def parse_sinfo_to_dataframe() -> pd.DataFrame:
         if i == "infinite":
             timlimits.append(pd.to_timedelta("1000 days"))
             continue
-        timlimits.append(pd.to_timedelta(df.TimeLimit.str.replace("-", " days ")))
+        timlimits.append(pd.to_timedelta(i.replace("-", " days ")))
     df["TimeLimit"] = timlimits
     df["Nodes"] = df["Nodes"].astype(int)
-    df["State"] = df["State"].astype("category")
     default_partition = [i for i in df.Partition if '*' in i][1]
     df.Partition = df.Partition.str.replace("*", "")
     df = df.loc[df.Partition != "admin"]
@@ -144,13 +143,6 @@ def config_equal(config1,config2):
 def run_single_indexamajiq(batch_dict, indexamajiq_dict,IO_config):
     sbatch = make_sbatch_cmd(batch_dict)
     indexer = make_indexamajiq_cmd(indexamajiq_dict,IO_config)
-#     cmd_template = '''{sbatch} <<EOF 
-# #!/bin/bash
-# module load crystfel
-
-# echo {indexer}
-# {indexer}
-# EOF'''
     cmd_template = '''{sbatch} --wrap="
 module load crystfel/0.11.0
 echo {indexer}
@@ -460,8 +452,6 @@ def align_spots(df_hits,df_crystal):
             df_hits.loc[f,'deviation'] = np.min(np.sqrt((df_hits.loc[f,'fs'] - crystal_panel.fs)**2 + (df_hits.loc[f,'ss'] - crystal_panel.ss)**2))
     return df_hits
 
-
-
 def calc_deviations(streamin):
     path_out  = streamin.replace('.stream','_deviations.csv')
     if os.path.exists(path_out):
@@ -478,7 +468,7 @@ def get_indexamajiq_parameters():
     parameters['--peaks'] = 'peakfinder8'
     parameters['--min-snr'] = '5'
     parameters['--min-peaks'] = '5'
-    parameters['--int-radius'] = '5,7,10'
+    parameters['--int-radius'] = '2,4,6'
     parameters['--indexing'] = 'xgandalf'
     parameters['--min-pix-count'] = '2'
     parameters['--multi'] = ''
@@ -609,8 +599,6 @@ def write_df_as_hklf4(df,outfile):
         for i in range(df.shape[0]):
             f.write(f'{int(df.iloc[i].h):>4}{int(df.iloc[i].k):>4}{int(df.iloc[i].l):>4}{df.iloc[i].I:>8.2f}{df.iloc[i].sigma:>8.2f}\n')
 
-
-
 def confert_hkl_to_hklf4(filein,fileout):
     df = read_partialator_hkl(filein)
     write_df_as_hklf4(df,fileout)
@@ -638,7 +626,6 @@ def setup_experiment(configpath,experiment_name):
     config['experiment'] = experiment_name
     return config
 
-
 def save_config(config: dict, path_out):
     with open(path_out,'w') as f:
         json.dump(config,f, indent=4)
@@ -658,6 +645,19 @@ def ask_for_input_until_file_exists(string_in):
         else:
             print('File does not exist')
     return path
+
+def run_align_detector(geom,geom_out,mille_file_match,sbatch_parameters=None,level=1):
+    if sbatch_parameters == None:
+        sbatch_parameters = get_sbatch_standard()
+    sbatch_parameters['-c'] = '1'
+    sbatch = make_sbatch_cmd(sbatch_parameters)
+    cmd_template = '''{sbatch} --wrap="
+module load crystfel/0.11.0
+echo {angle_analyser}
+{angle_analyser}"'''
+    angle_analyser = f'align_detector -i {geom} -o {geom_out} -l {level} {mille_file_match}'
+    cmd = cmd_template.format(sbatch = sbatch,angle_analyser = angle_analyser)
+    return slurm_tools.submit_string(cmd)
 
 class Experiment:
     def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None,partition=None,ncores=32) -> None:
@@ -719,7 +719,7 @@ class Experiment:
         save_config(self.config,self.config['configpath'])
         return runid
 
-    def setup_run(self,list_in,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None):
+    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None):
         if cell == None:
             cell = self.config['cell']
         if geom == None:
@@ -732,6 +732,8 @@ class Experiment:
                     break
                 i += 1
             runnumber = i
+        if list_in == None:
+            list_in = self.check_if_standard_list_exists()
         outdir = os.path.join(self.config['workpath'],f'run_{runnumber}')
         os.makedirs(outdir,exist_ok=True)
         list_local = os.path.join(outdir,f'run_{runnumber}.lst')
@@ -836,7 +838,7 @@ class Experiment:
         self.partialator_config['-y'] = pg
         self.partialator_config['-n'] = niter
         self.partialator_config['-j'] = self.sbatch_config['-c']
-        self.partialator_config['-m'] = model
+        self.partialator_config['--model'] = model
         if partialator_config != None:
             self.partialator_config.update(partialator_config)
         run = {'Run_started': False, 'Run_finished': False, 'Partialator_out': outhkl, 
@@ -877,6 +879,48 @@ class Experiment:
             else:
                 self.execute_run(run_id)
         self.wait_until_done()
+
+    def optimize_geometry(self,indexamajig_config=None,sbatch_parameters=None,nframes=5000,list_in=None):   
+        if indexamajig_config == None:
+            indexamajig_config = dict()
+        indexamajig_config['--mille'] = ''
+        if list_in == None:
+            list_in = self.check_if_standard_list_exists()
+        list_in = shuffle_lines_list(list_in,nframes)
+        mille_out_base = os.path.join(self.config['workpath'],'mille_{i}')
+        i = 0
+        while os.path.exists(mille_out_base.format(i=i)):
+            i += 1
+        indexamajig_config['--mille-dir'] = mille_out_base.format(i=i)
+        runnr = self.setup_run(list_in=list_in,indexamajig_config=indexamajig_config,sbatch_parameters=sbatch_parameters)
+        self.execute_run(runnr)
+
+    def run_align_detector(self,mille_files=None):
+        i = 0 
+        while os.path.exists(self.config['workpath'] + f'/align_detector_{i}'):
+            i += 1
+        outdir = os.path.join(self.config['workpath'],f'align_detector_{i}')
+        os.makedirs(outdir,exist_ok=True)
+        geom_out = os.path.join(outdir,f'align_detector_{i}.geom')
+        if mille_files == None:
+            i = 0
+            while os.path.exists(self.config['workpath'] + f'/mille_{i+1}'):
+                i += 1
+            mille_files = self.config['workpath'] + f'/mille_{i}/*.bin'
+            if len(glob(mille_files)) == 0:
+                print('No mille files found')
+                return
+        log_file = os.path.join(outdir,f'align_detector_{i}.log')
+        geom_in = self.config['geom']
+        shutil.copy(geom_in,outdir)
+        sbatch_params = self.config['sbatch_default'].copy()
+        sbatch_params['--output'] = log_file
+        run_align_detector(geom_in,geom_out,mille_files,sbatch_parameters=sbatch_params)
+        if not 'old_geoms'in self.config:
+            self.config['old_geoms'] = []
+        self.config['old_geoms'].append(geom_in)
+        self.config['geom'] = geom_out
+        save_config(self.config,self.config['configpath'])
 
     def wait_until_done(self):
         slurm_tools.wait_until_queue_empty(self.jobs)
