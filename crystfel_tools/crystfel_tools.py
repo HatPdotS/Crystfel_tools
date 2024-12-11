@@ -650,6 +650,7 @@ def run_align_detector(geom,geom_out,mille_file_match,sbatch_parameters=None,lev
     if sbatch_parameters == None:
         sbatch_parameters = get_sbatch_standard()
     sbatch_parameters['-c'] = '1'
+    sbatch_parameters['--chdir'] = os.path.dirname(geom_out)
     sbatch = make_sbatch_cmd(sbatch_parameters)
     cmd_template = '''{sbatch} --wrap="
 module load crystfel/0.11.0
