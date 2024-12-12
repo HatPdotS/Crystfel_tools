@@ -7,7 +7,7 @@ The script takes to arguments:
 
 Example scripts will be setup inside the diectory you run this from in a folder example scripts
 
-
+'''
 
 #!/bin/bash
 
@@ -30,3 +30,4 @@ pip install pandas h5py numpy tabulate # installs other dependencies
 pip install -e $INSTALLPATH/slurm_tools # installs slurmtools
 pip install -e $INSTALLPATH/crystfel_tools # installs crystfeltools
 cp -r $INSTALLPATH/crystfel_tools/example_scripts .
+'''
