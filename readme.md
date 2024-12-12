@@ -17,6 +17,7 @@ CONDAPATH=$1 # name of the conda environemt
 INSTALLPATH=$2 # directory where custom packages will be installed
 
 conda create -p $CONDAPATH # creates the conda environment
+
 conda activate $CONDANAME # acitvate conda environment
 
 conda install python=3.11
