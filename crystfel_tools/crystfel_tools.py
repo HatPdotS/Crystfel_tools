@@ -9,6 +9,7 @@ import shutil
 import numpy as np
 from collections import defaultdict
 
+
 def edit_geom(template: str, to_change: dict,outfile):
     with open(template) as f:
         with open(outfile,'w') as w:
@@ -22,6 +23,24 @@ def edit_geom(template: str, to_change: dict,outfile):
 
                         break
                 w.write(linenew)
+
+def convert_crystfel_to_mtz(file,outfile,cell,symm):
+    if isinstance(cell,list):
+        cell = ' '.join([str(p) for p in cell])
+    os.system(f"sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl")
+    cmd = f"""module load ccp4; f2mtz HKLIN create-mtz.temp.hkl HKLOUT {outfile} > out.html << EOF
+TITLE Reflections from CrystFEL
+NAME PROJECT wibble CRYSTAL wibble DATASET wibble
+CELL {cell}
+SYMM {symm}
+SKIP 3
+LABOUT H K L IMEAN SIGIMEAN
+CTYPE  H H H J     Q
+FORMAT '(3(F4.0,1X),F10.2,10X,F10.2)'
+EOF"""
+    os.system(cmd)
+    os.system('rm create-mtz.temp.hkl')
+
 
 def parse_sinfo_to_dataframe() -> pd.DataFrame:
     import subprocess
@@ -720,7 +739,7 @@ class Experiment:
         save_config(self.config,self.config['configpath'])
         return runid
 
-    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None):
+    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None,prefix='run'):
         if cell == None:
             cell = self.config['cell']
         if geom == None:
@@ -735,11 +754,11 @@ class Experiment:
             runnumber = i
         if list_in == None:
             list_in = self.check_if_standard_list_exists()
-        outdir = os.path.join(self.config['workpath'],f'run_{runnumber}')
+        outdir = os.path.join(self.config['workpath'],f'{prefix}_{runnumber}')
         os.makedirs(outdir,exist_ok=True)
-        list_local = os.path.join(outdir,f'run_{runnumber}.lst')
+        list_local = os.path.join(outdir,f'{prefix}_{runnumber}.lst')
         shutil.copy(list_in,list_local)
-        streamout = os.path.join(outdir,f'run_{runnumber}.stream')
+        streamout = os.path.join(outdir,f'{prefix}_{runnumber}.stream')
         self.indexamajig_config = get_indexamajiq_parameters()
         if indexamajig_config != None:
             self.indexamajig_config.update(indexamajig_config)
@@ -755,7 +774,7 @@ class Experiment:
         self.sbatch_parameters['--output'] = log
         self.sbatch_parameters['--error'] = log
         run = {'Run_started': False, 'Run_finished': False, 'Stream_name': streamout, 'Run_path': outdir, 'Run_config': self.indexamajig_config, 'Run_sbatch': self.sbatch_parameters,'IO_config': IO_config}
-        run_id = f'Run_{runnumber}'
+        run_id = f'{prefix}_{runnumber}'
         self.config[run_id] = run
         self.config['runs'].append(run_id)
         save_config(self.config,self.config['configpath'])
@@ -803,6 +822,9 @@ class Experiment:
         self.config['sbatch_default'] = get_sbatch_standard()
         save_config(self.config,self.config['configpath'])
 
+    def get_last_run(self):
+        return self.config['runs'][-1]
+    
     def setup_list(self,string_to_match=None):
         if string_to_match == None:
             string_to_match = self.config['data_dir'] + '/*.h5'
@@ -815,8 +837,10 @@ class Experiment:
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
 
-    def setup_partialator(self,runid,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None,save_config_=True):  
+    def setup_partialator(self,runid = None,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None,save_config_=True):  
         stream_in = self.config[runid]['Stream_name']
+        if runid == None:
+            runid = self.get_last_run()
         i = 0 
         while os.path.exists(self.config['workpath'] + f'/partialator_{i}'):
             i += 1
@@ -874,7 +898,7 @@ class Experiment:
             indexamajig_config = base_config
             if any([config_equal(base_config,self.config[run]['Run_config']) for run in self.config['runs']]):
                 continue
-            run_id = self.setup_run(list_in,indexamajig_config=indexamajig_config)
+            run_id = self.setup_run(list_in,indexamajig_config=indexamajig_config,prefix='screening')
             if split_job:
                 self.execute_job_split(run_id)
             else:

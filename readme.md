@@ -1,11 +1,14 @@
-Load anaconda and copy and run the script below
+To install this environment load anaconda and copy and run the script below
+
+On ESRF cluster: module load bcditools-conda # loads anaconda 
+On RA cluster: module load anaconda
 
 The script takes to arguments:
 
 1. the path to where you want to create the conda environment
 2. the path where you want to clone the python source code into
 
-Example scripts will be setup inside the diectory you run this from in a folder example scripts
+Example scripts will be setup inside the directory you run this from, in a folder example scripts
 
 ```
 
