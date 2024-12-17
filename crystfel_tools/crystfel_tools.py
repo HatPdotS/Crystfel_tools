@@ -680,7 +680,7 @@ echo {angle_analyser}
     return slurm_tools.submit_string(cmd)
 
 class Experiment:
-    def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, data_dir = None,partition=None,ncores=32) -> None:
+    def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, regex_data = None,partition=None,ncores=32) -> None:
         self.jobs = []   
         if load_experiment:
             with open(configpath,'r') as f:
@@ -693,8 +693,8 @@ class Experiment:
                 Cellfile = ask_for_input_until_file_exists('enter cell file: ')
             if Geomin == None:
                 Geomin = ask_for_input_until_file_exists('enter geom file: ')
-            if data_dir == None:
-                data_dir = ask_for_input_until_file_exists('enter data directory: ')
+            if regex_data == None:
+                regex_data = input('enter regex matching data: ')
             if partition == None:
                 valid_partitions = parse_sinfo_to_dataframe()
                 print('Partition suggestions are:',valid_partitions)
@@ -711,7 +711,7 @@ class Experiment:
             self.config['sbatch_default']['-p'] = partition
             self.config['sbatch_default']['-c'] = str(ncores)
             self.config['cell'] = Cellfile
-            self.config['data_dir'] = data_dir
+            self.config['regex_data'] = regex_data
             self.config['geom'] = Geomin
             self.config['configpath'] = configpath
             self.config['workpath'] = os.path.join(os.path.dirname(configpath),workdir)
@@ -747,7 +747,7 @@ class Experiment:
         if runnumber == None:
             i = 0 
             while True:
-                outdir = os.path.join(self.config['workpath'],f'run_{i}')
+                outdir = os.path.join(self.config['workpath'],f'{prefix}_{i}')
                 if not os.path.exists(outdir):
                     break
                 i += 1
@@ -827,7 +827,7 @@ class Experiment:
     
     def setup_list(self,string_to_match=None):
         if string_to_match == None:
-            string_to_match = self.config['data_dir'] + '/*.h5'
+            string_to_match = self.config['regex_data']
         list_out = os.path.join(self.config['workpath'],'list_files.lst')
         make_list(string_to_match,list_out)
         if self.config['h5py_path'] == None:
@@ -905,7 +905,7 @@ class Experiment:
                 self.execute_run(run_id)
         self.wait_until_done()
 
-    def optimize_geometry(self,indexamajig_config=None,sbatch_parameters=None,nframes=5000,list_in=None):   
+    def run_idexamajig_for_mille(self,indexamajig_config=None,sbatch_parameters=None,nframes=5000,list_in=None):   
         if indexamajig_config == None:
             indexamajig_config = dict()
         indexamajig_config['--mille'] = ''
@@ -950,8 +950,8 @@ class Experiment:
     def wait_until_done(self):
         slurm_tools.wait_until_queue_empty(self.jobs)
     
-    def summarize_runs(self):
-        run_ids = [key for key in self.config.keys() if 'Run' in key]
+    def summarize_runs(self,key_to_summarize='screening'):
+        run_ids = [key for key in self.config.keys() if key_to_summarize in key]
         res = []
         for run_id in run_ids:
             run = self.config[run_id]
