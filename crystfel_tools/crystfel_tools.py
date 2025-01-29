@@ -8,7 +8,9 @@ import h5py
 import shutil
 import numpy as np
 from collections import defaultdict
-
+from time import sleep
+import datetime
+import copy
 
 def edit_geom(template: str, to_change: dict,outfile):
     with open(template) as f:
@@ -24,10 +26,24 @@ def edit_geom(template: str, to_change: dict,outfile):
                         break
                 w.write(linenew)
 
+def read_runtime_from_log(logfile):
+    with open(logfile) as f:
+        lines = f.readlines()
+        firstline = lines[0]
+        lastline = lines[-1]
+        start = datetime.datetime.strptime(firstline.strip(),"%a %b %d %H:%M:%S %Z %Y")
+        try:
+            end = datetime.datetime.strptime(lastline.strip(),"%a %b %d %H:%M:%S %Z %Y")
+        except ValueError:
+            print('Returning NAN, could not read end time, process likely still running or quit unexpectedly for log:',logfile)
+            return np.nan
+    return end - start
+
+
 def convert_crystfel_to_mtz(file,outfile,cell,symm):
     if isinstance(cell,list):
         cell = ' '.join([str(p) for p in cell])
-    os.system(f"sed -n '/End\ of\ reflections/q;p' {file} > create-mtz.temp.hkl")
+    os.system(f"sed -n '/End of reflections/q;p' {file} > create-mtz.temp.hkl")
     cmd = f"""module load ccp4; f2mtz HKLIN create-mtz.temp.hkl HKLOUT {outfile} > out.html << EOF
 TITLE Reflections from CrystFEL
 NAME PROJECT wibble CRYSTAL wibble DATASET wibble
@@ -128,12 +144,12 @@ def make_cmd_from_dict(dic):
     for key in dic.keys():
         if dic[key] == None:
             continue
-        if dic[key] == '':
-            base += str(key) +' '
-            continue
-        if key[:2] == '--':
+        if key.startswith('--'):
+            if dic[key] == '':
+                base += str(key) +' '
+                continue
             base += str(key) + '='+ str(dic[key]) + ' '
-        else:
+        elif key.startswith('-'):
             base += str(key) + ' ' + str(dic[key]) + ' '
     return base
 
@@ -163,9 +179,12 @@ def run_single_indexamajiq(batch_dict, indexamajiq_dict,IO_config):
     sbatch = make_sbatch_cmd(batch_dict)
     indexer = make_indexamajiq_cmd(indexamajiq_dict,IO_config)
     cmd_template = '''{sbatch} --wrap="
+module purge
 module load crystfel/0.11.0
+date
 echo {indexer}
-{indexer}"'''
+{indexer}
+date"'''
     cmd = cmd_template.format(sbatch = sbatch,indexer = indexer)
     return slurm_tools.submit_string(cmd)
 
@@ -173,6 +192,7 @@ def run_partialator(batch_dict, partialator_config):
     sbatch = make_sbatch_cmd(batch_dict)
     partialator = make_partialator_cmd(partialator_config)
     cmd_template = '''{sbatch} --wrap="
+module purge
 module load crystfel/0.11.0
 echo {partialator}
 {partialator}"'''
@@ -191,6 +211,7 @@ def shuffle_lines_list(filein,n=None):
         random.shuffle(d)
     else:
         d = random.sample(d,n)
+    d = sorted(d)
     with open(fileout,'w') as g:
         g.writelines(d)
     return fileout
@@ -523,8 +544,8 @@ def make_standard_screen():
     screen['--min-pix-count'] = ['2','3']
     return screen
 
-def get_statistics(hklin,cell,resmax=None,nshells=20,
-                   fom_list = ['rsplit','cc','"cc*"'],resmin=None):
+def get_statistics(hklin,cell,resmax=None,resmin=None,nshells=20,
+                   fom_list = ['rsplit','cc','"cc*"']):
     dfs = []
     check_hkl_out = hklin.replace('.hkl','_stats.dat')
     cmd = '''module load crystfel/0.11.0; check_hkl {hklin} -p {cell} --nshells={nshells} --shell-file={check_hkl_out}'''
@@ -672,6 +693,7 @@ def run_align_detector(geom,geom_out,mille_file_match,sbatch_parameters=None,lev
     sbatch_parameters['--chdir'] = os.path.dirname(geom_out)
     sbatch = make_sbatch_cmd(sbatch_parameters)
     cmd_template = '''{sbatch} --wrap="
+module purge
 module load crystfel/0.11.0
 echo {angle_analyser}
 {angle_analyser}"'''
@@ -720,6 +742,39 @@ class Experiment:
             os.makedirs(self.config['workpath'],exist_ok=True)
             save_config(self.config,configpath)
     
+    def cat_runs(self,regex,prefix='concatenated_stream',outpath=None):
+        import re
+        if outpath == None:
+            
+            outpath = os.path.join(self.config['workpath'],'concatenated_streams', prefix + '_{i}.stream')
+            i = 0
+            while os.path.exists(outpath.format(i=i)):
+                i += 1
+            outpath = outpath.format(i=i)
+            run_id = prefix + f'_{i}.stream'
+            outdir = os.path.dirname(outpath)
+        os.makedirs(outdir,exist_ok=True)
+        run_names = self.config['runs']
+        if isinstance(regex,str):
+            regex = [regex]
+        assert isinstance(regex,list)
+        all_runs = []
+        for reg in regex:
+            reg = re.compile(reg)
+            runs = [run for run in run_names if reg.match(run)]
+            all_runs += runs
+        all_runs = list(set(all_runs))
+        for run in all_runs:
+            if self.config[run]['Ran_distributed'] and not os.path.exists(self.config[run]['Stream_name']):
+                self.cat_files(run)
+        stream_names = [self.config[run]['Stream_name'] for run in all_runs]
+        cat_files(stream_names,outpath)
+        self.config['runs'].append(run_id)
+        self.config[run_id] = {'stream_in': stream_names, 'Stream_name': outpath}
+        save_config(self.config,self.config['configpath'])
+        print('concatenated streams:',stream_names)
+        print('output:',outpath)
+
     def cut_stream(self,streamfile,n,runnumber = None):
         if runnumber == None:
             i = 0 
@@ -739,7 +794,7 @@ class Experiment:
         save_config(self.config,self.config['configpath'])
         return runid
 
-    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None,prefix='run'):
+    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None,prefix='run',copy_geom=True):
         if cell == None:
             cell = self.config['cell']
         if geom == None:
@@ -752,30 +807,43 @@ class Experiment:
                     break
                 i += 1
             runnumber = i
+        run_id = f'{prefix}_{runnumber}'
         if list_in == None:
             list_in = self.check_if_standard_list_exists()
-        outdir = os.path.join(self.config['workpath'],f'{prefix}_{runnumber}')
+        outdir = os.path.join(self.config['workpath'],run_id)
         os.makedirs(outdir,exist_ok=True)
-        list_local = os.path.join(outdir,f'{prefix}_{runnumber}.lst')
+        list_local = os.path.join(outdir,f'{run_id}.lst')
         shutil.copy(list_in,list_local)
-        streamout = os.path.join(outdir,f'{prefix}_{runnumber}.stream')
+        streamout = os.path.join(outdir,f'{run_id}.stream')
         self.indexamajig_config = get_indexamajiq_parameters()
         if indexamajig_config != None:
             self.indexamajig_config.update(indexamajig_config)
         self.sbatch_parameters = self.config['sbatch_default']
+        self.sbatch_parameters['--chdir'] = outdir
         if sbatch_parameters != None:
             self.sbatch_parameters.update(sbatch_parameters)
+        if copy_geom:
+            geom_internal = os.path.join(outdir,geom.split('/')[-1])
+            shutil.copy(geom,geom_internal)
+            geom = geom_internal
+        if 'detector_distance' in self.indexamajig_config.keys():
+            new_detector_distance = self.indexamajig_config['detector_distance']
+            new_geom = geom.replace('.geom',f'_distance_{new_detector_distance}.geom')
+            to_edit =  {'clen': '{i:.4f}'.format(i=new_detector_distance/1000)}
+            edit_geom(geom, to_edit, new_geom)
+            geom = new_geom
         IO_config = dict()
         IO_config['-i'] = list_local
         IO_config['-o'] = streamout
         IO_config['-p'] = cell
         IO_config['-g'] = geom
-        log = os.path.join(outdir,f'run_{runnumber}.log')
+        log = os.path.join(outdir,f'{run_id}.log')
         self.sbatch_parameters['--output'] = log
         self.sbatch_parameters['--error'] = log
-        run = {'Run_started': False, 'Run_finished': False, 'Stream_name': streamout, 'Run_path': outdir, 'Run_config': self.indexamajig_config, 'Run_sbatch': self.sbatch_parameters,'IO_config': IO_config}
-        run_id = f'{prefix}_{runnumber}'
-        self.config[run_id] = run
+        run = {'Run_started': False, 'Run_finished': False, 'Stream_name': streamout, 'Run_path': outdir, 
+        'Run_config': self.indexamajig_config, 'Run_sbatch': self.sbatch_parameters,'IO_config': IO_config,
+        'Ran_distributed': False}
+        self.config[run_id] = copy.deepcopy(run)
         self.config['runs'].append(run_id)
         save_config(self.config,self.config['configpath'])
         return run_id
@@ -785,7 +853,7 @@ class Experiment:
         self.jobs.append(run_single_indexamajiq(run['Run_sbatch'],run['Run_config'],run['IO_config']))
         run['Run_started'] = True
     
-    def execute_job_split(self,run_id,nchunks=5):
+    def execute_job_split(self,run_id,nchunks=5,wait_until_done=True):
         run = self.config[run_id]
         run_path = run['Run_path']
         lists = split_list_file(run['IO_config']['-i'],nchunks)
@@ -805,10 +873,11 @@ class Experiment:
             run['Run_sbatch']['--error'] = log
             self.jobs.append(run_single_indexamajiq(run['Run_sbatch'],run['Run_config'],run['IO_config']))
         run['stream_parts'] = stream_parts
-        self.config[run_id] = run
+        self.config[run_id] = copy.deepcopy(run)
         save_config(self.config,self.config['configpath'])
-        self.wait_until_done()
-        self.cat_files(run_id)
+        if wait_until_done:
+            self.wait_until_done()
+            self.cat_files(run_id)
     
     def cat_files(self,run_id):
         run = self.config[run_id]
@@ -837,39 +906,40 @@ class Experiment:
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
 
-    def setup_partialator(self,runid = None,pg=None, niter = '3', sbatch_config = None, model='xsphere', partialator_config = None,save_config_=True):  
-        stream_in = self.config[runid]['Stream_name']
-        if runid == None:
-            runid = self.get_last_run()
+    def setup_partialator(self,runid = None, stream_in=None, sbatch_config = None, partialator_config = None,save_config_=True,prefix='partialator'):  
+        if runid == None and stream_in == None:
+            stream_in = input('No runid or stream_in given, please enter stream_path:')
+        elif stream_in == None:
+            stream_in = self.config[runid]['Stream_name']
         i = 0 
-        while os.path.exists(self.config['workpath'] + f'/partialator_{i}'):
+        while os.path.exists(self.config['workpath'] + f'/{prefix}_{i}'):
             i += 1
-        if pg == None:
+        if not '-y' in partialator_config.keys():
             try: 
                 pg = self.config['pg']
+                partialator_config['-y'] = pg
             except:
                 pg = input('Enter partialator pg: ')
-        outpath = self.config['workpath'] + f'/partialator_{i}'
-        outhkl = outpath + f'/partialator_{i}.hkl'
+                partialator_config['-y'] = pg
+                self.config['pg'] = pg
+        outpath = self.config['workpath'] + f'/{prefix}_{i}'
+        outhkl = outpath + f'/{prefix}_{i}.hkl'
         self.sbatch_config = self.config['sbatch_default']
-        self.sbatch_config['--output'] = outpath + f'/partialator_{i}.log'
-        self.sbatch_config['--error'] = outpath + f'/partialator_{i}.log'
+        self.sbatch_config['--output'] = outpath + f'/{prefix}_{i}.log'
+        self.sbatch_config['--error'] = outpath + f'/{prefix}_{i}.log'
         if sbatch_config != None:
             self.sbatch_config.update(sbatch_config)
         os.makedirs(outpath,exist_ok=True)
         self.partialator_config = dict()
         self.partialator_config['-i'] = stream_in
         self.partialator_config['-o'] = outhkl
-        self.partialator_config['-y'] = pg
-        self.partialator_config['-n'] = niter
         self.partialator_config['-j'] = self.sbatch_config['-c']
-        self.partialator_config['--model'] = model
         if partialator_config != None:
             self.partialator_config.update(partialator_config)
         run = {'Run_started': False, 'Run_finished': False, 'Partialator_out': outhkl, 
                'Run_path': outhkl, 'Partialator_config': self.partialator_config, 'Partialator_sbatch': self.sbatch_config}
-        run_id = f'Partialator_{i}'
-        self.config[run_id] = run
+        run_id = f'{prefix}_{i}'
+        self.config[run_id] = run.copy()
         self.config['runs'].append(run_id)
         if save_config_:
             save_config(self.config,self.config['configpath'])
@@ -903,6 +973,7 @@ class Experiment:
                 self.execute_job_split(run_id)
             else:
                 self.execute_run(run_id)
+            sleep(1)
         self.wait_until_done()
 
     def run_idexamajig_for_mille(self,indexamajig_config=None,sbatch_parameters=None,nframes=5000,list_in=None):   
@@ -957,6 +1028,9 @@ class Experiment:
             run = self.config[run_id]
             n_indexed = get_n_indexed_from_stream(run['Stream_name'])
             config = run['Run_config']
+            log = run['Run_sbatch']['--output']
+            time = read_runtime_from_log(log)
+            config['run_time'] = time
             config['run_id'] = run_id
             config['n_indexed'] = [n_indexed]
             df = pd.DataFrame(config)
