@@ -18,13 +18,13 @@ param['--max-res'] = '2000'
 param['--min-res'] = '20'
 param['--int-radius'] = '2,4,6'
 
-
+runid = ''   # number of the run bamline side e.g. 000001
 
 
 Experiment = cft.Experiment(configpath=configpath)
 
 
-runid = Experiment.setup_run(indexamajig_config=param)
+runid = Experiment.setup_run(indexamajig_config=param,prefix=runid)
 
 
 Experiment.execute_job_split(runid,nchunks=nchunks) # execute the job split in chunks be careful, if nchunk = 1000, 1000 jobs will be submitted

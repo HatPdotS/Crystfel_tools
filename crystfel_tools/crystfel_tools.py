@@ -39,6 +39,10 @@ def read_runtime_from_log(logfile):
             return np.nan
     return end - start
 
+def get_len_text_file(file):
+    with open(file) as f:
+        return len(f.readlines())
+
 
 def convert_crystfel_to_mtz(file,outfile,cell,symm):
     if isinstance(cell,list):
@@ -128,6 +132,11 @@ def get_all_events_smart(pathin,h5py_path):
                         fnew.write(to_write)
         return pathout
 
+def make_difference_map(mtz1,mtz2,outdir,dark_model,restraints,resmax=100,resmin=0):
+    from functions.io_functions import make_diff_map_Xtrapol8
+    os.makedirs(outdir,exist_ok=True)
+    make_diff_map_Xtrapol8(mtz1, mtz2, dark_model,outdir, restraints ,res_max=resmax,res_min=resmin)
+
 def make_indexamajiq_cmd(parameters: dict,IO_config: dict):
     base = 'indexamajig '
     base += make_cmd_from_dict(parameters)
@@ -180,7 +189,7 @@ def run_single_indexamajiq(batch_dict, indexamajiq_dict,IO_config):
     indexer = make_indexamajiq_cmd(indexamajiq_dict,IO_config)
     cmd_template = '''{sbatch} --wrap="
 module purge
-module load crystfel/0.11.0
+module load crystfel/0.11.1
 date
 echo {indexer}
 {indexer}
@@ -193,7 +202,7 @@ def run_partialator(batch_dict, partialator_config):
     partialator = make_partialator_cmd(partialator_config)
     cmd_template = '''{sbatch} --wrap="
 module purge
-module load crystfel/0.11.0
+module load crystfel/0.11.1
 echo {partialator}
 {partialator}"'''
     cmd = cmd_template.format(sbatch = sbatch,partialator = partialator)
@@ -211,7 +220,6 @@ def shuffle_lines_list(filein,n=None):
         random.shuffle(d)
     else:
         d = random.sample(d,n)
-    d = sorted(d)
     with open(fileout,'w') as g:
         g.writelines(d)
     return fileout
@@ -239,9 +247,13 @@ def produce_1000_events_per_file(pathin):
                     to_write = line + ' //' + str(i) + '\n'
                     n.write(to_write)
 
-def split_list_file(pathin,nchunks):
-    name_list = [pathin.replace('.lst','_' + str(i)+'.lst') for i in range(nchunks)]
-    
+def split_list_file(pathin,nchunks,list_sub_dir = None):
+    if list_sub_dir == None:
+        name_list = [pathin.replace('.lst','_' + str(i)+'.lst') for i in range(nchunks)]
+    else:
+        path_list = '/'.join(pathin.split('/')[:-1])
+        os.makedirs(path_list + '/' + list_sub_dir,exist_ok=True)
+        name_list = [path_list + '/' + list_sub_dir + '/' + pathin.split('/')[-1].replace('.lst','_' + str(i)+'.lst') for i in range(nchunks)]
     with open(pathin,'r') as f:
         chunksize = len(f.readlines())//nchunks
         print(chunksize)
@@ -344,14 +356,16 @@ def mask_maker(h5_in,n=1000,id=None,boxsize=7,mask_inner_edges=True,mask_outer_e
 def cat_files(list_files,outpath,remove_group_statements = True):
     with open(outpath,'w') as f:
         for file in list_files:
-            with open(file,'r') as g:
-                for line in g:
-                    if remove_group_statements:
-                        if line.strip('\n') == 'bandwidth = 1.000000e-08':
-                            continue
-                        if line[:6] == 'group_':
-                            continue
-                    f.write(line)
+            try:
+                with open(file,'r') as g:
+                    for line in g:
+                        if remove_group_statements:
+                            if line.strip('\n') == 'bandwidth = 1.000000e-08':
+                                continue
+                            if line[:6] == 'group_':
+                                continue
+                        f.write(line)
+            except: print('could not find file',file)
 
 def make_list(str_to_match,list_out):
     files = glob(str_to_match)
@@ -416,13 +430,16 @@ def remove_geometry_file(filein):
                     g.write(line)
 
 def read_crystal(file_open):
+    lines = ['--- Begin crystal\n']
     cell = ''
     while True: 
         line = next(file_open)
+        lines.append(line)
         if line[:15] == 'Cell parameters':
             cell = line[15:].strip('\n').replace('nm,','').replace('deg','')
             continue
         if line.strip('\n') == 'Reflections measured after indexing':
+            lines.append(line)
             line = next(file_open)
             h = []
             k = []
@@ -451,7 +468,7 @@ def read_crystal(file_open):
                 panel.append(_panel)
             break
     df = pd.DataFrame({'h': h, 'k': k, 'l': l, 'I': I, 'sigmaI': sigmaI, 'peak': peak, 'background': background, 'fs': fs, 'ss': ss, 'panel': panel, 'cell': cell})
-    return df
+    return df, lines
 
 def read_only_indexed(filein, n_hits=100000):
     with open(filein) as f:
@@ -461,7 +478,7 @@ def read_only_indexed(filein, n_hits=100000):
             if line.strip('\n') == '----- Begin chunk -----':
                 df_hit, _ , _ = read_hits(f)
                 if next(f).strip('\n') == '--- Begin crystal':
-                    df_crystal = read_crystal(f)
+                    df_crystal, _ = read_crystal(f)
                     hits.append(df_hit)
                     crystals.append(df_crystal)
                     if len(hits) == n_hits:
@@ -475,12 +492,69 @@ def get_crystals(filein):
             if line.strip('\n') == '----- Begin chunk -----':
                 _, filename , event = read_hits(f)
                 if next(f).strip('\n') == '--- Begin crystal':
-                    df_crystal = read_crystal(f)
+                    df_crystal, _ = read_crystal(f)
                     df_crystal['filename'] = filename
                     df_crystal['event'] = event
                     crystals.append(df_crystal)
     crystals = pd.concat(crystals)
     return crystals
+
+def get_hits(filein,only_indexed = False):
+    with open(filein) as f:
+        hits = []
+        for line in f: 
+            if line.strip('\n') == '----- Begin chunk -----':
+                df_hit, filename , event = read_hits(f)
+                acq = int(filename.split('acq')[1].split('.')[0])
+                runnr = int(filename.split('run')[1].split('-')[0])
+                df_hit['acq'] = acq
+                df_hit['runnr'] = runnr
+                df_hit['event'] = event
+                if next(f).strip('\n') == '--- Begin crystal' or not only_indexed:
+                    hits.append(df_hit)
+    return hits
+
+def read_intensities_from_stream(stream):
+    with open(stream) as f:
+        intensities = []
+        for line in f:
+            if line == 'Reflections measured after indexing\n':
+                next(f)
+                for line in f:
+                    if line == 'End of reflections\n':
+                        break
+                    intensities.append(float(line.split()[3]))
+    return np.array(intensities)
+    
+
+def get_cells(filein):
+    with open(filein) as f:
+        cells = []
+        for line in f: 
+            if line.startswith('Cell parameters'):
+                _,_,a,b,c,_,alpha,beta,gamma,_ =line.split()
+                cells.append((float(a)*10,float(b)*10,float(c)*10,float(alpha),float(beta),float(gamma)))
+    cells = np.array(cells)
+    return cells
+
+def get_resolution(filein):
+    with open(filein) as f:
+        res = []
+        for line in f: 
+            if line.startswith('peak_resolution'):
+                res.append(float(line.split()[-2]))
+    res = np.array(res)
+    return res
+
+
+
+def get_profile_radii_from_stream(streamin):
+    radii = []
+    with open(streamin) as f:
+        for line in f:
+            if line.startswith('profile_radius'):
+                radii.append(float(line.split()[2]))
+    return radii
 
 def align_spots(df_hits,df_crystal):
     panels = df_hits['Panel'].unique()
@@ -694,12 +768,49 @@ def run_align_detector(geom,geom_out,mille_file_match,sbatch_parameters=None,lev
     sbatch = make_sbatch_cmd(sbatch_parameters)
     cmd_template = '''{sbatch} --wrap="
 module purge
-module load crystfel/0.11.0
+module load crystfel/0.11.1
 echo {angle_analyser}
 {angle_analyser}"'''
     angle_analyser = f'align_detector -i {geom} -o {geom_out} -l {level} {mille_file_match}'
     cmd = cmd_template.format(sbatch = sbatch,angle_analyser = angle_analyser)
     return slurm_tools.submit_string(cmd)
+
+def sanitize_stream(stream_in,Stream_out,write_hits=True):
+    with open(stream_in,'r') as f:
+        with open(Stream_out,'w') as g:
+            for line in f:
+                g.write(line)
+                if line.startswith('----- Begin chunk -----'):
+                    chunk = [line]
+                    crystals = []
+                    crystals_ok_beamradius = []
+                    has_crystals = False
+                    for line in f:
+                        chunk.append(line)
+                        if line.startswith('----- End chunk -----'):
+                            break
+                        if line.startswith('--- Begin crystal'):
+                            has_crystals = True
+                            crystal = []
+                            crystal_beamradius_ok = True
+                            for line in f:
+                                crystal.append(line)
+                                if line.startswith('--- End crystal'):
+                                    break
+                                if line.startswith('profile_radius'):
+                                    if float(line.split('=')[-1].split()[0].strip()) == 0:
+                                        print('found a crystal with beamradius 0')
+                                        crystal_beamradius_ok = False
+                            crystals_ok_beamradius.append(crystal_beamradius_ok)
+                            crystals.append(crystal)
+                    if write_hits or has_crystals:
+                        g.writelines(chunk[:-1])
+                        if has_crystals:
+                            for i,crystal in enumerate(crystals):
+                                if crystals_ok_beamradius[i]:
+                                    g.writelines(crystal)
+                        g.write(chunk[-1])
+    return Stream_out
 
 class Experiment:
     def __init__(self,configpath, load_experiment=True,h5py_path = None,workdir = 'work' ,experiment_name=None, Cellfile=None, Geomin = None, regex_data = None,partition=None,ncores=32) -> None:
@@ -794,7 +905,7 @@ class Experiment:
         save_config(self.config,self.config['configpath'])
         return runid
 
-    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None,prefix='run',copy_geom=True):
+    def setup_run(self,list_in=None,runnumber=None,cell=None,geom=None,indexamajig_config=None,sbatch_parameters=None,prefix='run',copy_geom=True,sub_folder=None):
         if cell == None:
             cell = self.config['cell']
         if geom == None:
@@ -802,7 +913,10 @@ class Experiment:
         if runnumber == None:
             i = 0 
             while True:
-                outdir = os.path.join(self.config['workpath'],f'{prefix}_{i}')
+                if sub_folder != None:
+                    outdir = os.path.join(self.config['workpath'],sub_folder,f'{prefix}_{i}')
+                else:
+                    outdir = os.path.join(self.config['workpath'],f'{prefix}_{i}')
                 if not os.path.exists(outdir):
                     break
                 i += 1
@@ -810,7 +924,7 @@ class Experiment:
         run_id = f'{prefix}_{runnumber}'
         if list_in == None:
             list_in = self.check_if_standard_list_exists()
-        outdir = os.path.join(self.config['workpath'],run_id)
+        
         os.makedirs(outdir,exist_ok=True)
         list_local = os.path.join(outdir,f'{run_id}.lst')
         shutil.copy(list_in,list_local)
@@ -837,12 +951,14 @@ class Experiment:
         IO_config['-o'] = streamout
         IO_config['-p'] = cell
         IO_config['-g'] = geom
+
         log = os.path.join(outdir,f'{run_id}.log')
         self.sbatch_parameters['--output'] = log
         self.sbatch_parameters['--error'] = log
         run = {'Run_started': False, 'Run_finished': False, 'Stream_name': streamout, 'Run_path': outdir, 
         'Run_config': self.indexamajig_config, 'Run_sbatch': self.sbatch_parameters,'IO_config': IO_config,
         'Ran_distributed': False}
+        run['n_images'] = get_len_text_file(list_local)
         self.config[run_id] = copy.deepcopy(run)
         self.config['runs'].append(run_id)
         save_config(self.config,self.config['configpath'])
@@ -853,20 +969,28 @@ class Experiment:
         self.jobs.append(run_single_indexamajiq(run['Run_sbatch'],run['Run_config'],run['IO_config']))
         run['Run_started'] = True
     
-    def execute_job_split(self,run_id,nchunks=5,wait_until_done=True):
+    def execute_run_split(self,run_id,nchunks=None,images_per_chunk=None,wait_until_done=True,chunk_subfolder='chunks'):
+        if nchunks == None and images_per_chunk == None:
+            raise ValueError('Either nchunks or images_per_chunk must be given')
+        run = self.config[run_id]
+        if nchunks == None:
+            nchunks = int(np.ceil(run['n_images']/images_per_chunk))
+            print(f'run {run_id} will be split into {nchunks} chunks, it has {run["n_images"]} images')
         run = self.config[run_id]
         run_path = run['Run_path']
-        lists = split_list_file(run['IO_config']['-i'],nchunks)
+        lists = split_list_file(run['IO_config']['-i'],nchunks,list_sub_dir='lists')
         run['Run_started'] = True
         run['Ran_distributed'] = True
         run['nchunks'] = nchunks
         stream_parts = []
         for i,list_ in enumerate(lists):
-            outdir = os.path.join(run_path,f'chunk_{i}')
+            outdir = os.path.join(run_path,chunk_subfolder,f'chunk_{i}')
             os.makedirs(outdir,exist_ok=True)
             streamout = os.path.join(outdir,f'chunk_{i}.stream')
             log = os.path.join(outdir,f'chunk_{i}.log')
             stream_parts.append(streamout)
+            if '--mille-dir' in run['Run_config']:
+                run['Run_config']['--mille-dir'] = outdir + '/mille'
             run['IO_config']['-i'] = list_
             run['IO_config']['-o'] = streamout
             run['Run_sbatch']['--output'] = log
@@ -906,13 +1030,18 @@ class Experiment:
         list_out_all = get_all_events_smart(list_out,self.config['h5py_path'])
         return list_out_all
 
-    def setup_partialator(self,runid = None, stream_in=None, sbatch_config = None, partialator_config = None,save_config_=True,prefix='partialator'):  
+    def setup_partialator(self,runid = None, stream_in=None, sbatch_config = None, partialator_config = None,save_config_=True,prefix='partialator',outpath=None,subfolder=None):  
         if runid == None and stream_in == None:
             stream_in = input('No runid or stream_in given, please enter stream_path:')
         elif stream_in == None:
             stream_in = self.config[runid]['Stream_name']
+        workpath = self.config['workpath']
+        if outpath != None:
+            workpath = outpath
         i = 0 
-        while os.path.exists(self.config['workpath'] + f'/{prefix}_{i}'):
+        if subfolder != None:
+            workpath = os.path.join(workpath,subfolder)
+        while os.path.exists(workpath + f'/{prefix}_{i}'):
             i += 1
         if not '-y' in partialator_config.keys():
             try: 
@@ -922,7 +1051,7 @@ class Experiment:
                 pg = input('Enter partialator pg: ')
                 partialator_config['-y'] = pg
                 self.config['pg'] = pg
-        outpath = self.config['workpath'] + f'/{prefix}_{i}'
+        outpath = workpath + f'/{prefix}_{i}'
         outhkl = outpath + f'/{prefix}_{i}.hkl'
         self.sbatch_config = self.config['sbatch_default']
         self.sbatch_config['--output'] = outpath + f'/{prefix}_{i}.log'
@@ -956,42 +1085,54 @@ class Experiment:
             list_out = self.setup_list()
         return list_out
     
-    def screen_indexing_parameters(self,screen,split_job=False,list_in=None,sample_size=5000):
+    def screen_indexing_parameters(self,screen,sbatch_parameters=None,split_job=False,list_in=None,sample_size=5000,subfolder=None,wait_until_done=True,ignore_repeats=True):
         if list_in == None:
             list_in = self.check_if_standard_list_exists()
-        list_in = shuffle_lines_list(list_in,sample_size)
+        if os.path.exists(list_in.replace('.lst',f'.shuffled_sample_{sample_size}.lst')):
+            list_in = list_in.replace('.lst',f'.shuffled_sample_{sample_size}.lst')
+        else:
+            list_in = shuffle_lines_list(list_in,sample_size)
         product_values = product(*[v if isinstance(v, (list, tuple)) else [v] for v in screen.values()])
         params = [dict(zip(screen.keys(), values)) for values in product_values]
         for param in params:
             base_config = get_indexamajiq_parameters()
             base_config.update(param)
             indexamajig_config = base_config
-            if any([config_equal(base_config,self.config[run]['Run_config']) for run in self.config['runs']]):
-                continue
-            run_id = self.setup_run(list_in,indexamajig_config=indexamajig_config,prefix='screening')
+            if ignore_repeats:
+                if any([config_equal(base_config,self.config[run]['Run_config']) for run in self.config['runs']]):
+                    continue
+            run_id = self.setup_run(list_in,indexamajig_config=indexamajig_config,sbatch_parameters=sbatch_parameters,prefix='screening',sub_folder=subfolder)
             if split_job:
                 self.execute_job_split(run_id)
             else:
                 self.execute_run(run_id)
-            sleep(1)
-        self.wait_until_done()
+            # sleep(1)
+        if wait_until_done: 
+            self.wait_until_done()
 
-    def run_idexamajig_for_mille(self,indexamajig_config=None,sbatch_parameters=None,nframes=5000,list_in=None):   
+    def run_idexamajig_for_mille(self,indexamajig_config=None,sbatch_parameters=None,nframes=5000,list_in=None,split_chunk=None,sub_folder=None):   
         if indexamajig_config == None:
             indexamajig_config = dict()
         indexamajig_config['--mille'] = ''
         if list_in == None:
             list_in = self.check_if_standard_list_exists()
         list_in = shuffle_lines_list(list_in,nframes)
-        mille_out_base = os.path.join(self.config['workpath'],'mille_{i}')
+        if sub_folder == None:
+            mille_out_base = os.path.join(self.config['workpath'],'mille_{i}')
+        else:
+            mille_out_base = os.path.join(self.config['workpath'],sub_folder,'mille_{i}')
         i = 0
         while os.path.exists(mille_out_base.format(i=i)):
             i += 1
         indexamajig_config['--mille-dir'] = mille_out_base.format(i=i)
-        runnr = self.setup_run(list_in=list_in,indexamajig_config=indexamajig_config,sbatch_parameters=sbatch_parameters)
-        self.execute_run(runnr)
+        runnr = self.setup_run(list_in=list_in,indexamajig_config=indexamajig_config,sbatch_parameters=sbatch_parameters,sub_folder=sub_folder)
+        if split_chunk == None:
+            self.execute_run(runnr)
+        else:
+            self.execute_run_split(runnr,split_chunk)
 
-    def run_align_detector(self,mille_files=None):
+
+    def run_align_detector(self,mille_files=None,geom_in=None):
         i = 0 
         while os.path.exists(self.config['workpath'] + f'/align_detector_{i}'):
             i += 1
@@ -1007,7 +1148,8 @@ class Experiment:
                 print('No mille files found')
                 return
         log_file = os.path.join(outdir,f'align_detector_{i}.log')
-        geom_in = self.config['geom']
+        if geom_in == None:
+            geom_in = self.config['geom']
         shutil.copy(geom_in,outdir)
         sbatch_params = self.config['sbatch_default'].copy()
         sbatch_params['--output'] = log_file
