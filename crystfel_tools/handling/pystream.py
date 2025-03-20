@@ -56,6 +56,77 @@ def is_valid_float(s):
     except ValueError:
         return False
 
+def read_chunks_only_meta(chunk_of_data):
+    chunks = []
+    lines = chunk_of_data.decode().splitlines()
+    iter_lines = iter(lines)
+    while True:
+        chunk = dict()
+        try:
+            line = next(iter_lines)
+        except StopIteration:
+            break
+        chunk['filename'] = line.split()[-1]
+        chunk['Event'] = int(next(iter_lines).split()[-1].strip('//'))
+        chunk['Image serial number'] = int(next(iter_lines).split()[-1])
+        for line in iter_lines:
+            if line.startswith('Peaks from peak search'):
+                break
+            key, value = line.split('=')
+            value = value.strip().split()[0]    
+            try: 
+                value = int(value)
+            except:
+                value = str(value)
+            chunk[key.strip()] = value
+        line = next(iter_lines)
+        for line in iter_lines:
+            if line.startswith('End of peak list'):
+                break
+        chunk['crystals'] = []
+        for line in iter_lines:
+            if line.startswith('----- End chunk -----'):
+                break
+            if line.startswith('--- Begin crystal'):
+                crystal = dict()
+                line = next(iter_lines)
+                cell = [float(i) for i in line.split() if is_valid_float(i)]
+                crystal['cell'] = cell
+                line = next(iter_lines)
+                crystal['astar'] = [float(i) for i in line.split() if is_valid_float(i)]
+                line = next(iter_lines)
+                crystal['bstar'] = [float(i) for i in line.split() if is_valid_float(i)]
+                line = next(iter_lines)
+                crystal['cstar'] = [float(i) for i in line.split() if is_valid_float(i)]
+                line = next(iter_lines)
+                for line in iter_lines:
+                    if line.startswith('Reflections measured after indexing'):
+                        break
+                    try:
+                        key, value = line.split('=')
+                        value = value.strip().split()[0]
+                        try:
+                            value = int(value)
+                        except:
+                            value = str(value)
+                        crystal[key.strip()] = value
+                    except:
+                        key, valuex, valuey = line.split('=')
+                        valuex = valuex.strip().split()[0]
+                        valuey = valuey.strip().split()[0]
+                        crystal[key.strip()] = [valuex, valuey]
+                line = next(iter_lines)
+                for line in iter_lines:
+                    if line.startswith('End of reflections'):
+                        break
+                chunk['crystals'].append(crystal)
+        chunk['ncrystals'] = len(chunk['crystals'])
+        chunks.append(chunk)
+        for line in iter_lines:
+            if line.startswith('----- Begin chunk -----'):
+                break
+    return chunks
+
 def read_chunks(chunk_of_data):
     chunks = []
     lines = chunk_of_data.decode().splitlines()
@@ -264,6 +335,13 @@ def read_stream(stream_file,nthreads = 56):
     chunks = [item for sublist in chunks for item in sublist]
     return chunks
 
+def read_stream_only_meta(stream_file,nthreads = 56):
+    data = read_file_in_segments(stream_file,nthreads)
+    with Pool.Pool(processes = nthreads) as p:
+        chunks = p.map(read_chunks_only_meta, data)
+    chunks = [item for sublist in chunks for item in sublist]
+    return chunks
+
 def read_stream_shared_array(stream_file,nthreads = 56):
     data = read_file_in_segments(stream_file,nthreads)
     file_size = get_filesize(stream_file)
@@ -306,20 +384,28 @@ def unpack_pds(chunks):
     pass
 
 class pystream:
-    def __init__(self,stream_file=None,nthreads = 56):
+    def __init__(self,stream_file=None,nthreads = 56,dummy=False):
         self.nthreads = nthreads
-
+        self.dummy = dummy
         if isinstance(stream_file, str):
             self.stream_file = stream_file
             self.read_stream(stream_file)
         
-    def read_stream(self,streamfile):
-        self.stream, self.hit_array, self.indexed_array = read_stream_shared_array(streamfile,self.nthreads)
-        self.hits = pd.DataFrame(self.hit_array,columns = ['fs/px','ss/px','(1/d)/nm^-1','Intensity','Panel'])
-        self.indexed = pd.DataFrame(self.indexed_array,columns = ['h','k','l','I','sigma','peak','background','fs/px','ss/px','panel'])
-        print('stream read')
-        print('Chunks length',len(self.stream))
-        print('Crystals length',sum([len(chunk['crystals']) for chunk in self.stream]))
+    def read_stream(self,streamfile,dummy = False):
+        if not dummy:
+            self.stream, self.hit_array, self.indexed_array = read_stream_shared_array(streamfile,self.nthreads)
+            self.hits = pd.DataFrame(self.hit_array,columns = ['fs/px','ss/px','(1/d)/nm^-1','Intensity','Panel'])
+            self.indexed = pd.DataFrame(self.indexed_array,columns = ['h','k','l','I','sigma','peak','background','fs/px','ss/px','panel'])
+            print('stream read')
+            print('Chunks length',len(self.stream))
+            print('Crystals length',sum([len(chunk['crystals']) for chunk in self.stream]))
+        else: 
+            self.stream = read_stream_only_meta(streamfile,self.nthreads)
+            self.hits = None
+            self.indexed = None
+            print('stream read, did not load actual data only metadata')
+            print('Chunks length',len(self.stream))
+            print('Crystals length',sum([len(chunk['crystals']) for chunk in self.stream]))
 
     def universal_assigner(self, df, column, values, slices):
         df[column] = -1
