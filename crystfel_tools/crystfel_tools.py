@@ -11,6 +11,8 @@ from collections import defaultdict
 from time import sleep
 import datetime
 import copy
+import reciprocalspaceship
+import gemmi
 
 def edit_geom(template: str, to_change: dict,outfile):
     with open(template) as f:
@@ -61,6 +63,68 @@ EOF"""
     os.system(cmd)
     os.system('rm create-mtz.temp.hkl')
 
+def convert_crystfel_to_mtz_new(file,outfile,cell,symm,max_res=None):
+    h = []
+    k = []
+    l = []
+    I = []
+    SIGMA = []
+    nmeas = []
+    with open(file) as f:
+        next(f)
+        next(f)
+        next(f)
+        for line in f:
+            if line.strip('\n') == 'End of reflections':
+                break
+            _h,_k,_l,_I,_,_sigma,_nmeas = line.strip('\n').split()
+            h.append(np.int32(_h))
+            k.append(np.int32(_k))
+            l.append(np.int32(_l))
+            I.append(float(_I))
+            SIGMA.append(float(_sigma))
+            nmeas.append(int(_nmeas))
+    dataset = reciprocalspaceship.DataSet({'H':h,'K':k,'L':l,'I':I,'sigma(I)':SIGMA,'NMEAS':nmeas})
+    dataset.set_index(['H','K','L'],inplace=True)
+    print(dataset) 
+    dataset.cell = cell
+    dataset.spacegroup = symm
+    if max_res != None:
+        resolution = get_resolution(np.array([h,k,l]).T,cell)
+        dataset = dataset.loc[resolution > max_res]
+    print(dataset)
+    dataset.infer_mtz_dtypes(inplace=True)
+    dataset.write_mtz(outfile)
+
+
+
+def calc_rec_space_vector(cell):
+    a = cell[0]
+    b = cell[1]
+    c = cell[2]
+    alpha = np.deg2rad(cell[3])
+    beta = np.deg2rad(cell[4])
+    gamma = np.deg2rad(cell[5])
+    va = np.array([a,0,0])
+    vb = np.array([b * np.cos(gamma),b * np.sin(gamma),0])
+    Vc = np.sqrt(1 - np.cos(alpha)**2 - np.cos(beta)**2 - np.cos(gamma)**2 + 2 * np.cos(alpha) * np.cos(beta) * np.cos(gamma))
+    vc = np.array([c * np.cos(beta),c * (np.cos(alpha) - np.cos(beta) * np.cos(gamma)) / np.sin(gamma),c * Vc])
+    V = np.dot(va,np.cross(vb,vc))
+    astar = np.cross(vb,vc) / V
+    bstar = np.cross(vc,va) / V
+    cstar = np.cross(va,vb) / V
+    print(astar,bstar,cstar)
+    return np.vstack((astar,bstar,cstar))
+
+def get_resolution(hkl,cell):
+    rec = calc_rec_space_vector(cell)
+    rec_vector = np.matmul(hkl,rec)
+    res = 1/np.linalg.norm(rec_vector,axis=1)
+    return res
+
+# def get_resolution(hkl,cell):
+#     rec = calc_rec_space_vector(cell)
+#     return 1 / np.sqrt(np.sum((hkl @ rec)**2,axis=1))
 
 def parse_sinfo_to_dataframe() -> pd.DataFrame:
     import subprocess
@@ -537,7 +601,7 @@ def get_cells(filein):
     cells = np.array(cells)
     return cells
 
-def get_resolution(filein):
+def get_max_peak_resolution(filein):
     with open(filein) as f:
         res = []
         for line in f: 
