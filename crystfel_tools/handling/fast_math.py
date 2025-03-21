@@ -225,3 +225,36 @@ def evaluate_crystal_new(factors,hkl,I,cell,ech,deltaech,rho_cut=0.1):
 
 def evaluate_crystal_xsphere(factors,hkl,I,cell):
     return I / factors[0] / np.exp(calc_log_xsphere(hkl,*factors[[1,2,3,4]],cell))
+
+def reciprocal_basis_matrix(unit_cell):
+    # Extract unit cell parameters
+    a, b, c, alpha, beta, gamma = unit_cell
+    alpha, beta, gamma = np.radians([alpha, beta, gamma])
+    # Compute real-space basis vectors
+    cos_alpha, cos_beta, cos_gamma = np.cos(alpha), np.cos(beta), np.cos(gamma)
+    sin_gamma = np.sin(gamma)
+    volume = np.sqrt(1 - cos_alpha**2 - cos_beta**2 - cos_gamma**2 + 2 * cos_alpha * cos_beta * cos_gamma)
+    a_vec = np.array([a, 0, 0])
+    b_vec = np.array([b * cos_gamma, b * sin_gamma, 0])
+    c_vec = np.array([
+        c * cos_beta,
+        c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma,
+        c * volume / sin_gamma
+    ])
+    # Compute reciprocal basis vectors
+    volume_real = np.dot(a_vec, np.cross(b_vec, c_vec))
+    a_star = np.cross(b_vec, c_vec) / volume_real
+    b_star = np.cross(c_vec, a_vec) / volume_real
+    c_star = np.cross(a_vec, b_vec) / volume_real
+    # Assemble reciprocal basis matrix
+    return np.array([a_star, b_star, c_star])
+
+def get_scattering_vectors(hkl, unit_cell):
+    recB = reciprocal_basis_matrix(unit_cell)
+    hkl = np.array(hkl)  # Ensure hkl is a numpy array
+    s = np.dot(hkl,recB)
+    return s
+
+def get_resolution(hkl, unit_cell):
+    s = get_scattering_vectors(hkl, unit_cell)
+    return 1 / np.sum(s**2, axis=1)**0.5

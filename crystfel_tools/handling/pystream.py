@@ -6,9 +6,7 @@ from collections import defaultdict
 from multiprocessing import shared_memory, Lock ,Value
 import pyarrow as pa
 import numpy as np
-
-
-stream_file = '/das/work/p17/p17490/Peter/Library/crystfel_tools/test_data/chunk_1.stream'
+import pickle
 
 def get_starting_positions(stream_file, nthreads):
     with open(stream_file, 'r') as f:
@@ -406,6 +404,25 @@ class pystream:
             print('stream read, did not load actual data only metadata')
             print('Chunks length',len(self.stream))
             print('Crystals length',sum([len(chunk['crystals']) for chunk in self.stream]))
+    
+    def write_pkl(self,fileout):
+        self.move_to_main_process_memory()
+        hits_se = pa.serialize_pandas(self.hits)
+        indexed_se = pa.serialize_pandas(self.indexed)
+        to_write = [self.stream,hits_se,indexed_se]
+        with open(fileout, 'wb') as f:
+            pickle.dump(to_write, f)
+        print('stream written to as pickle',fileout)  
+
+    def read_pkl(self,filein):
+        with open(filein, 'rb') as f:
+            to_read = pickle.load(f)
+        self.stream = to_read[0]
+        self.hits = pa.deserialize_pandas(to_read[1])
+        self.indexed = pa.deserialize_pandas(to_read[2])
+        print('stream read from pickle',filein)
+        print('Chunks length',len(self.stream))
+        print('Crystals length',sum([len(chunk['crystals']) for chunk in self.stream]))
 
     def universal_assigner(self, df, column, values, slices):
         df[column] = -1
@@ -438,6 +455,7 @@ class pystream:
                 except:
                     print(chunk['filename'])
         self.universal_assigner(self.indexed,'runnr',runnrs,s)
+        
     
     def label_reflections_event(self):
         events = []

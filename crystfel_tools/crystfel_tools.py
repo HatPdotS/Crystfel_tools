@@ -13,6 +13,7 @@ import datetime
 import copy
 import reciprocalspaceship
 import gemmi
+from crystfel_tools.handling import fast_math
 
 def edit_geom(template: str, to_change: dict,outfile):
     with open(template) as f:
@@ -45,6 +46,16 @@ def get_len_text_file(file):
     with open(file) as f:
         return len(f.readlines())
 
+def bin_hkl(hkl,cell,bins=20):
+    hkl['res'] = fast_math.get_resolution(hkl[['h','k','l']].values,cell)
+    sorted_res = np.sort(hkl.res)[::-1]
+    sorted_res[0] = sorted_res[0] + 10
+    sorted_res[-1] = 0
+    reflection_to_target = sorted_res.shape[0] // bins
+    bins = sorted_res[::reflection_to_target]
+    bins[-1] = 0
+    hkl['bin'] = np.digitize(hkl.res,bins)
+    return hkl
 
 def convert_crystfel_to_mtz(file,outfile,cell,symm):
     if isinstance(cell,list):
@@ -95,36 +106,6 @@ def convert_crystfel_to_mtz_new(file,outfile,cell,symm,max_res=None):
     print(dataset)
     dataset.infer_mtz_dtypes(inplace=True)
     dataset.write_mtz(outfile)
-
-
-
-def calc_rec_space_vector(cell):
-    a = cell[0]
-    b = cell[1]
-    c = cell[2]
-    alpha = np.deg2rad(cell[3])
-    beta = np.deg2rad(cell[4])
-    gamma = np.deg2rad(cell[5])
-    va = np.array([a,0,0])
-    vb = np.array([b * np.cos(gamma),b * np.sin(gamma),0])
-    Vc = np.sqrt(1 - np.cos(alpha)**2 - np.cos(beta)**2 - np.cos(gamma)**2 + 2 * np.cos(alpha) * np.cos(beta) * np.cos(gamma))
-    vc = np.array([c * np.cos(beta),c * (np.cos(alpha) - np.cos(beta) * np.cos(gamma)) / np.sin(gamma),c * Vc])
-    V = np.dot(va,np.cross(vb,vc))
-    astar = np.cross(vb,vc) / V
-    bstar = np.cross(vc,va) / V
-    cstar = np.cross(va,vb) / V
-    print(astar,bstar,cstar)
-    return np.vstack((astar,bstar,cstar))
-
-def get_resolution(hkl,cell):
-    rec = calc_rec_space_vector(cell)
-    rec_vector = np.matmul(hkl,rec)
-    res = 1/np.linalg.norm(rec_vector,axis=1)
-    return res
-
-# def get_resolution(hkl,cell):
-#     rec = calc_rec_space_vector(cell)
-#     return 1 / np.sqrt(np.sum((hkl @ rec)**2,axis=1))
 
 def parse_sinfo_to_dataframe() -> pd.DataFrame:
     import subprocess
@@ -590,7 +571,6 @@ def read_intensities_from_stream(stream):
                     intensities.append(float(line.split()[3]))
     return np.array(intensities)
     
-
 def get_cells(filein):
     with open(filein) as f:
         cells = []
@@ -609,8 +589,6 @@ def get_max_peak_resolution(filein):
                 res.append(float(line.split()[-2]))
     res = np.array(res)
     return res
-
-
 
 def get_profile_radii_from_stream(streamin):
     radii = []
