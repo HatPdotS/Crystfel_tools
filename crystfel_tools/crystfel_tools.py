@@ -8,7 +8,6 @@ import h5py
 import shutil
 import numpy as np
 from collections import defaultdict
-from time import sleep
 import datetime
 import copy
 import reciprocalspaceship
@@ -97,13 +96,11 @@ def convert_crystfel_to_mtz_new(file,outfile,cell,symm,max_res=None):
             nmeas.append(int(_nmeas))
     dataset = reciprocalspaceship.DataSet({'H':h,'K':k,'L':l,'I':I,'sigma(I)':SIGMA,'NMEAS':nmeas})
     dataset.set_index(['H','K','L'],inplace=True)
-    print(dataset) 
     dataset.cell = cell
     dataset.spacegroup = symm
     if max_res != None:
-        resolution = get_resolution(np.array([h,k,l]).T,cell)
+        resolution = fast_math.get_resolution(np.array([h,k,l]).T,cell)
         dataset = dataset.loc[resolution > max_res]
-    print(dataset)
     dataset.infer_mtz_dtypes(inplace=True)
     dataset.write_mtz(outfile)
 
@@ -662,16 +659,20 @@ def make_standard_screen():
 
 def get_statistics(hklin,cell,resmax=None,resmin=None,nshells=20,
                    fom_list = ['rsplit','cc','"cc*"']):
+    import subprocess
     dfs = []
     check_hkl_out = hklin.replace('.hkl','_stats.dat')
-    cmd = '''module load crystfel/0.11.0; check_hkl {hklin} -p {cell} --nshells={nshells} --shell-file={check_hkl_out}'''
+    cmd = '''module use MX; module load crystfel/0.11.1; check_hkl {hklin} -p {cell} --nshells={nshells} --shell-file={check_hkl_out}'''
     cmd = cmd.format(hklin=hklin,cell=cell,nshells=nshells,check_hkl_out=check_hkl_out)
     if resmax != None:
         cmd += ' --highres={rescut}'.format(rescut=resmax)
     if resmin != None:
         cmd += ' --lowres={rescut}'.format(rescut=resmin)
-    os.system(cmd)
-    df = pd.read_csv(check_hkl_out,delim_whitespace=True,skiprows=1,names=['1/d centre','nrefs_possible','nrefs_observed','Compl','Meas','Red','SNR','Mean I','d/A','Min 1/nm','Max 1/nm'])
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    print(result.stdout)
+    if result.stderr:
+        print(f"Error: {result.stderr}")
+    df = pd.read_csv(check_hkl_out,sep=r'\s+',skiprows=1,names=['1/d centre','nrefs_possible','nrefs_observed','Compl','Meas','Red','SNR','Mean I','d/A','Min 1/nm','Max 1/nm'])
     df.set_index('d/A',inplace=True)
     df = df[['nrefs_observed','Compl','Meas','Red','SNR','Mean I']]
     dfs.append(df)
@@ -679,16 +680,19 @@ def get_statistics(hklin,cell,resmax=None,resmin=None,nshells=20,
         hkl1 = hklin.replace('.hkl',f'.hkl1')
         hkl2 = hklin.replace('.hkl',f'.hkl2')
         path_out = hklin.replace('.hkl',f'_{fom}.dat').replace('"cc*"','ccstar')
-        cmd = '''module load crystfel/0.11.0; compare_hkl {hkl1} {hkl2} -p {cell} --fom={fom} --nshells={nshells} --shell-file={path_out}'''
+        cmd = '''module use MX; module load crystfel/0.11.1; compare_hkl {hkl1} {hkl2} -p {cell} --fom={fom} --nshells={nshells} --shell-file={path_out}'''
         cmd = cmd.format(hkl1=hkl1,hkl2=hkl2,cell=cell,fom=fom,nshells=nshells,path_out=path_out)
         if resmax != None:
             cmd += ' --highres={rescut}'.format(rescut=resmax)
         if resmin != None:
             cmd += ' --lowres={rescut}'.format(rescut=resmin)
-        os.system(cmd)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print(f"Error: {result.stderr}")
         if fom == '"cc*"':
             fom = 'ccstar'
-        df = pd.read_csv(path_out,delim_whitespace=True,skiprows=1,names=['1/d centre',fom,'nref','d/A','Min 1/nm','Max 1/nm'])
+        df = pd.read_csv(path_out,sep=r'\s+',skiprows=1,names=['1/d centre',fom,'nref','d/A','Min 1/nm','Max 1/nm'])
         df.set_index('d/A',inplace=True)
         dfs.append(df[fom])
     df = pd.concat(dfs,axis=1)
@@ -744,7 +748,7 @@ def read_partialator_hkl(file):
     df.I = df.I.astype(float)
     df.sigma = df.sigma.astype(float)
     df.nmeas = df.nmeas.astype(int)
-    print(df)
+    # print(df)
     return df
 
 def write_df_as_hklf4(df,outfile):

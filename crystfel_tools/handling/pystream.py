@@ -242,7 +242,7 @@ def read_chunks_shared_mem(args):
                 value = int(value)
             except:
                 value = str(value)
-            chunk[key.strip()] = value
+            chunk[key.strip().replace('/','_')] = value
         hits = defaultdict(list)
         line = next(iter_lines)
         for line in iter_lines:
@@ -288,12 +288,12 @@ def read_chunks_shared_mem(args):
                             value = int(value)
                         except:
                             value = str(value)
-                        crystal[key.strip()] = value
+                        crystal[key.strip().replace('/','_')] = value
                     except:
                         key, valuex, valuey = line.split('=')
                         valuex = valuex.strip().split()[0]
                         valuey = valuey.strip().split()[0]
-                        crystal[key.strip()] = [valuex, valuey]
+                        crystal[key.strip().replace('/','_')] = [valuex, valuey]
                 reflections = defaultdict(list)
                 line = next(iter_lines)
                 for line in iter_lines:
@@ -405,6 +405,21 @@ class pystream:
             print('Chunks length',len(self.stream))
             print('Crystals length',sum([len(chunk['crystals']) for chunk in self.stream]))
     
+    def get_indexed(self):
+        self.indexed_stream = []
+        for chunk in self.stream:
+            if chunk['ncrystals'] > 0:
+                self.indexed_stream.append(chunk)
+        return self.indexed_stream
+
+    def unpack_crystals(self):  
+        self.crystals = []
+        for chunk in self.stream:
+            for crystal in chunk['crystals']:
+                self.crystals.append(crystal)
+        return self.crystals
+
+
     def write_pkl(self,fileout):
         self.move_to_main_process_memory()
         hits_se = pa.serialize_pandas(self.hits)

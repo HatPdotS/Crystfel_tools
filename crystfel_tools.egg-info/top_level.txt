@@ -1,1 +1,3 @@
 crystfel_tools
+example_scripts
+test_data
