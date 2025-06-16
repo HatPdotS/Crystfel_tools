@@ -8,6 +8,19 @@ import pyarrow as pa
 import numpy as np
 import pickle
 
+def read_panel_ids(stream):
+    panel_ids = dict()
+    counter =0
+    with open(stream, 'r') as f:
+        for line in f:
+            if line.startswith('----- End geometry file -----'):
+                break
+            if 'min_fs' in line:
+                panel_id = line.split('/')[0]
+                panel_ids[panel_id] = counter
+                counter += 1
+    return panel_ids
+
 def get_starting_positions(stream_file, nthreads):
     with open(stream_file, 'r') as f:
         f.seek(0, 2)  # Move to end of file
@@ -158,7 +171,7 @@ def read_chunks(chunk_of_data):
             hits['ss/px'].append(float(line_split[1]))
             hits['(1/d)/nm^-1'].append(float(line_split[2]))
             hits['Intensity'].append(float(line_split[3]))
-            hits['Panel'].append(line_split[4])
+            hits['Panel'].append(panel_ids[line_split[4]])
         hits = pa.serialize_pandas(pd.DataFrame(hits))
         chunk['hits'] = hits
         chunk['crystals'] = []
@@ -208,7 +221,7 @@ def read_chunks(chunk_of_data):
                     reflections['background'].append(float(line_split[6]))
                     reflections['fs/px'].append(float(line_split[7]))
                     reflections['ss/px'].append(float(line_split[8]))
-                    reflections['panel'].append(line_split[9])
+                    reflections['panel'].append(panel_ids[line_split[9]])
                 reflections = pd.DataFrame(reflections)
                 crystal['reflections'] = pa.serialize_pandas(reflections)
                 chunk['crystals'].append(crystal)
@@ -253,7 +266,7 @@ def read_chunks_shared_mem(args):
             hits['ss/px'].append(float(line_split[1]))
             hits['(1/d)/nm^-1'].append(float(line_split[2]))
             hits['Intensity'].append(float(line_split[3]))
-            hits['Panel'].append(float(line_split[4].strip('m')))
+            hits['Panel'].append(panel_ids[line_split[4]])
         hits_array = np.array((hits['fs/px'],hits['ss/px'],hits['(1/d)/nm^-1'],hits['Intensity'],hits['Panel']),dtype = np.float64)
         len_hits = len(hits['fs/px'])
         with lock:
@@ -309,7 +322,7 @@ def read_chunks_shared_mem(args):
                     reflections['background'].append(float(line_split[6]))
                     reflections['fs/px'].append(float(line_split[7]))
                     reflections['ss/px'].append(float(line_split[8]))
-                    reflections['panel'].append(int(line_split[9].strip('m')))
+                    reflections['panel'].append(panel_ids[line_split[9]])
                 reflections_array = np.array((reflections['h'],reflections['k'],reflections['l'],reflections['I'],reflections['sigma'],reflections['peak'],reflections['background'],reflections['fs/px'],reflections['ss/px'],reflections['panel']),dtype = np.float64)
                 len_reflections = len(reflections['h'])
                 with lock:
@@ -346,7 +359,8 @@ def read_stream_shared_array(stream_file,nthreads = 56):
     max_array_size = file_size // 5
     shared_array_shape = (max_array_size//5,5)
     dtype = np.dtype('float64')
-    global hitarray,indexed_array,current_idx_hits,current_idx_indexed,lock,hitarray_shm,indexed_array_shm
+    global hitarray,indexed_array,current_idx_hits,current_idx_indexed,lock,hitarray_shm,indexed_array_shm,panel_ids
+    panel_ids = read_panel_ids(stream_file)
     def cleanup_shared_memory():
         """Cleanup shared memory on exit."""
         global hitarray_shm, indexed_array_shm
@@ -387,10 +401,12 @@ class pystream:
         self.dummy = dummy
         if isinstance(stream_file, str):
             self.stream_file = stream_file
-            self.read_stream(stream_file)
+            self.read_stream(stream_file,dummy=self.dummy)
+            
         
     def read_stream(self,streamfile,dummy = False):
         if not dummy:
+            self.panel_ids = read_panel_ids(streamfile)
             self.stream, self.hit_array, self.indexed_array = read_stream_shared_array(streamfile,self.nthreads)
             self.hits = pd.DataFrame(self.hit_array,columns = ['fs/px','ss/px','(1/d)/nm^-1','Intensity','Panel'])
             self.indexed = pd.DataFrame(self.indexed_array,columns = ['h','k','l','I','sigma','peak','background','fs/px','ss/px','panel'])
